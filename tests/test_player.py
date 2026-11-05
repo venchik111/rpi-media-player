@@ -43,9 +43,12 @@ def test_placeholder_before_upload(vm):
 
 
 def test_sftp_upload_switches_to_video(vm, media):
+    # uploaded by the 'media' user (password from rpi-player.conf), not root
     vm.upload(media["h264"], "/data/media/clip_h264.mp4")
     st = vm.wait_for(lambda: vm.state().get("mode") == "video" and vm.state(), timeout=60)
     assert st["source"] == "/data/media/clip_h264.mp4"
+    rc, out, _ = vm.run("ls -l /data/media/clip_h264.mp4 | awk '{print $3}'")
+    assert out.strip() == "media"
 
 
 def test_playlist_is_live_and_advances(vm):

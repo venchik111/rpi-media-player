@@ -27,6 +27,7 @@ expect "root filesystem mounted"            'EXT4-fs \(mmcblk[01]p2\): mounted'
 expect "BOOT + data partitions mounted"     'rpi-player: storage ready \(boot=/dev/mmcblk[01]p1 data=/dev/mmcblk[01]p3\)'
 expect "reached login prompt"               'login:'
 reject "kernel panic"                       'Kernel panic|Oops|BUG:'
-reject "init script errors"                 'not found|Permission denied|syntax error|can.t open'
+reject "init script errors"                 'sh: .*not found|: not found$|Permission denied|syntax error|can.t open'
+reject "kernel modules fail to load"       'invalid module format|Invalid ELF header'
 echo "(expected on QEMU: 'no wlan0 interface' -> $(grep -c 'no wlan0' "$LOG") line)"
 if [ $FAIL = 0 ]; then echo "RASPI4B BOOT PASSED"; else echo "RASPI4B BOOT FAILED"; tail -40 "$LOG"; exit 1; fi

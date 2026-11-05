@@ -18,10 +18,10 @@ SERIAL_LOG = RUN_DIR / "serial.log"
 BOOT_TIMEOUT = int(os.environ.get("BOOT_TIMEOUT", "300"))  # TCG emulation is slow
 
 
-def _ssh_client():
+def _ssh_client(user="root", password="player"):
     c = paramiko.SSHClient()
     c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    c.connect("127.0.0.1", port=SSH_PORT, username="root", password="player",
+    c.connect("127.0.0.1", port=SSH_PORT, username=user, password=password,
               timeout=10, banner_timeout=30, auth_timeout=30,
               allow_agent=False, look_for_keys=False)
     return c
@@ -101,12 +101,15 @@ class VM:
         _, out, _ = self.run("player-ctl status")
         return dict(l.split("=", 1) for l in out.split() if "=" in l)
 
-    def upload(self, local, remote):
-        sftp = self.ssh.open_sftp()
+    def upload(self, local, remote, user="media", password="media"):
+        """Upload like a user would: SFTP as the 'media' account by default."""
+        client = _ssh_client(user, password)
         try:
+            sftp = client.open_sftp()
             sftp.put(str(local), remote)
-        finally:
             sftp.close()
+        finally:
+            client.close()
 
     def get(self, path, **kw):
         return requests.get(self.http + path, timeout=10, **kw)

@@ -41,7 +41,11 @@ BR2_PACKAGE_BRCMFMAC_SDIO_FIRMWARE_RPI_WIFI=y
 BR2_PACKAGE_WIRELESS_REGDB=y
 
 # --- Packages (keep in sync with qemu_player_defconfig) ---
+BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y
 BR2_PACKAGE_KMOD=y
+# kmod modprobe: the Pi kernel ships xz-compressed modules (busybox modprobe
+# cannot load them -> no brcmfmac -> no Wi-Fi)
+BR2_PACKAGE_KMOD_TOOLS=y
 BR2_PACKAGE_HOST_KMOD_XZ=y
 BR2_PACKAGE_XZ=y
 BR2_PACKAGE_E2FSPROGS=y

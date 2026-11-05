@@ -61,6 +61,12 @@ dbg "dump /lib/modules/$KDIR/modules.alias $T/modules.alias" >/dev/null
 for m in brcmfmac brcmutil cfg80211; do
 	grep -qE "/$m\.ko(\.xz|\.gz|\.zst)?:" "$T/modules.dep" && ok "module $m" || bad "module $m missing"
 done
+if grep -qE '\.ko\.(xz|gz|zst):' "$T/modules.dep"; then
+	# compressed modules need kmod's modprobe; busybox's fails with "invalid module format"
+	link=$(dbg "stat /sbin/modprobe" | sed -n 's/.*Fast link dest: "\(.*\)"/\1/p')
+	case "$link" in *kmod*) ok "modprobe is kmod (modules are compressed)" ;;
+		*) bad "modules are compressed but /sbin/modprobe -> '${link:-?}' (not kmod)" ;; esac
+fi
 grep -q 'sdio:c\*v02D0d4345' "$T/modules.alias" && ok "brcmfmac SDIO alias for BCM43455 (autoload)" || bad "no SDIO alias for BCM43455"
 grep -qE '/bcm2835-codec\.ko' "$T/modules.dep" && ok "bcm2835-codec (HW H.264 encoder)" || warn "bcm2835-codec missing: transcoding falls back to libx264"
 

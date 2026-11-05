@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc g++ make patch perl python3 rsync bc cpio unzip file \
         wget ca-certificates git libncurses-dev xz-utils bzip2 gzip ccache \
         qemu-system-arm qemu-utils \
-        ffmpeg openssh-client sshpass curl fdisk e2fsprogs mtools dosfstools binutils \
+        ffmpeg openssh-client sshpass curl fdisk e2fsprogs mtools dosfstools binutils device-tree-compiler \
         python3-pytest python3-paramiko python3-requests \
     && rm -rf /var/lib/apt/lists/*
 
