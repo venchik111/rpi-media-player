@@ -51,7 +51,18 @@ if [ "$TARGET" = rpi4 ]; then
 	K_REV=$(sed -n 's/.*call github,raspberrypi,linux,\([0-9a-f]\{40\}\).*/\1/p' \
 		"$EXT/configs/rpi4_player_defconfig" | head -n1)
 	K_DIR="${BR2_DL_DIR:-$WORK/dl}/rpi-linux-shallow"
-	if [ "$(git -C "$K_DIR" rev-parse HEAD 2>/dev/null || true)" != "$K_REV" ]; then
+	# A pre-downloaded tarball (dl/linux/linux-<rev>.tar.gz, e.g. copied from
+	# another machine) is used instead of git when present.
+	K_TAR="${BR2_DL_DIR:-$WORK/dl}/linux/linux-$K_REV.tar.gz"
+	if [ -f "$K_TAR" ] && [ "$(cat "$K_DIR/.rev" 2>/dev/null)" != "$K_REV" ] \
+		&& [ "$(git -C "$K_DIR" rev-parse HEAD 2>/dev/null || true)" != "$K_REV" ]; then
+		echo ">>> using kernel tarball $K_TAR"
+		rm -rf "$K_DIR"; mkdir -p "$K_DIR"
+		tar xzf "$K_TAR" -C "$K_DIR" --strip-components=1
+		echo "$K_REV" > "$K_DIR/.rev"
+	fi
+	if [ "$(cat "$K_DIR/.rev" 2>/dev/null)" != "$K_REV" ] \
+		&& [ "$(git -C "$K_DIR" rev-parse HEAD 2>/dev/null || true)" != "$K_REV" ]; then
 		rm -rf "$K_DIR"
 		git -c init.defaultBranch=main init -q "$K_DIR"
 		git -C "$K_DIR" remote add origin https://github.com/raspberrypi/linux.git

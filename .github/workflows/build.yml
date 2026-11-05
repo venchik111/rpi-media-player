@@ -9,6 +9,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     steps:
+      - name: Free disk space (runner has ~14 GB free, two Buildroot trees need more)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune -af >/dev/null
+          df -h /
+
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -32,7 +38,11 @@ jobs:
           echo "RUN=docker run --rm -v $PWD:/src -v $RUNNER_TEMP/work:/work -w /src rpi-player-builder" >> "$GITHUB_ENV"
 
       - name: Build QEMU kernel (test twin)
-        run: $RUN scripts/build.sh qemu
+        run: |
+          $RUN scripts/build.sh qemu
+          # only out/qemu/Image is needed later; drop the build tree
+          sudo rm -rf "$RUNNER_TEMP/work/output-qemu"
+          df -h /
 
       - name: Build Raspberry Pi image
         run: $RUN scripts/build.sh rpi4
