@@ -2,3 +2,7 @@
 # streams it very slowly. scripts/build.sh fetches only boot/ firmware files
 # with a sparse, blob-filtered git checkout and Buildroot uses that instead.
 RPI_FIRMWARE_OVERRIDE_SRCDIR = $(BR2_DL_DIR)/rpi-firmware-sparse
+
+# Same problem for the Raspberry Pi kernel tarball: use a shallow git fetch
+# of the pinned commit (see scripts/build.sh).
+LINUX_OVERRIDE_SRCDIR = $(BR2_DL_DIR)/rpi-linux-shallow

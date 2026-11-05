@@ -46,6 +46,18 @@ if [ "$TARGET" = rpi4 ]; then
 		git -C "$FW_DIR" fetch -q --depth 1 --filter=blob:none origin "$FW_REV"
 		git -C "$FW_DIR" -c advice.detachedHead=false checkout -q FETCH_HEAD
 	fi
+
+	# Raspberry Pi kernel: commit pinned in the defconfig tarball URL.
+	K_REV=$(sed -n 's/.*call github,raspberrypi,linux,\([0-9a-f]\{40\}\).*/\1/p' \
+		"$EXT/configs/rpi4_player_defconfig" | head -n1)
+	K_DIR="${BR2_DL_DIR:-$WORK/dl}/rpi-linux-shallow"
+	if [ "$(git -C "$K_DIR" rev-parse HEAD 2>/dev/null || true)" != "$K_REV" ]; then
+		rm -rf "$K_DIR"
+		git -c init.defaultBranch=main init -q "$K_DIR"
+		git -C "$K_DIR" remote add origin https://github.com/raspberrypi/linux.git
+		git -C "$K_DIR" fetch -q --depth 1 origin "$K_REV"
+		git -C "$K_DIR" -c advice.detachedHead=false checkout -q FETCH_HEAD
+	fi
 fi
 
 if [ ! -f "$OUT/.config" ] || [ "$EXT/configs/${TARGET}_player_defconfig" -nt "$OUT/.config" ]; then
