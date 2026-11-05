@@ -17,7 +17,8 @@ done
 KERNEL=$(sed -n 's/^kernel=//p' "${BINARIES_DIR}/rpi-firmware/config.txt")
 FILES+=( "${KERNEL}" "rpi-player.conf" )
 
-BOOT_FILES=$(printf '\t\t\t"%s",\n' "${FILES[@]}")
+# Escaped \t and \n on purpose: sed below turns them into real tabs/newlines.
+BOOT_FILES=$(printf '\\t\\t\\t"%s",\\n' "${FILES[@]}")
 sed "s|#BOOT_FILES#|${BOOT_FILES}|" "${BOARD_DIR}/genimage.cfg.in" > "${GENIMAGE_CFG}"
 
 # Empty data partition (media files, ssh host keys).

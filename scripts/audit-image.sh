@@ -72,9 +72,17 @@ grep -qE '^brcmfmac43455-sdio\.(raspberrypi,4-model-b\.txt|txt)$' "$T/fw" && ok 
 check "regulatory.db" exists /lib/firmware/regulatory.db
 
 for b in /usr/sbin/hostapd /usr/sbin/dnsmasq /usr/sbin/sshd /usr/bin/ffmpeg /usr/bin/ffprobe \
-	/usr/sbin/lighttpd /usr/lib/lighttpd/mod_setenv.so /usr/bin/ssh-keygen /usr/sbin/iw /sbin/fsck.ext4; do
+	/usr/sbin/lighttpd /usr/bin/ssh-keygen /usr/sbin/iw /sbin/fsck.ext4; do
 	check "$b" exists "$b"
 done
+# mod_setenv (Cache-Control/CORS headers) is built into lighttpd >= 1.4.6x;
+# accept either the builtin (string in the binary) or a plugin .so.
+dbg "dump /usr/sbin/lighttpd $T/lighttpd" >/dev/null
+if grep -qa 'mod_setenv' "$T/lighttpd" || exists /usr/lib/lighttpd/mod_setenv.so; then
+	ok "lighttpd has mod_setenv"
+else
+	bad "lighttpd lacks mod_setenv"
+fi
 for s in S01storage S20modules S41eth0 S42wifi-ap S43dnsmasq S44sshd S60httpd S70player; do
 	mode=$(dbg "stat /etc/init.d/$s" | sed -n 's/.*Mode: *\([0-7]*\).*/\1/p')
 	[ "${mode: -3}" = 755 ] && ok "init.d/$s executable" || bad "init.d/$s mode=$mode"
