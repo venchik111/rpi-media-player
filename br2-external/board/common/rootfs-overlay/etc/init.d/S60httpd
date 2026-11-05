@@ -1,0 +1,21 @@
+#!/bin/sh
+# lighttpd serves the live HLS directory on HLS_PORT (all interfaces).
+. /usr/libexec/rpi-player/common.sh
+CONF=/run/lighttpd.conf
+PID=/run/lighttpd.pid
+HLS_DIR=/run/hls
+
+start() {
+	load_env
+	mkdir -p "$HLS_DIR"
+	cp /usr/share/rpi-player/index.html "$HLS_DIR/index.html"
+	sed "s/@PORT@/${HLS_PORT:-8080}/" /etc/lighttpd/rpi-player.conf.in > "$CONF"
+	start-stop-daemon -S -q -p "$PID" -x /usr/sbin/lighttpd -- -f "$CONF"
+}
+
+case "$1" in
+	start) start ;;
+	stop) start-stop-daemon -K -q -p "$PID"; rm -f "$PID" ;;
+	restart) "$0" stop; sleep 1; "$0" start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

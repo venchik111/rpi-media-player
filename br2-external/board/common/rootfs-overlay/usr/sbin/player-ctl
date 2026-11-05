@@ -1,0 +1,173 @@
+#!/bin/sh
+# player-ctl: keeps a live HLS stream in /run/hls, looping the uploaded video
+# like an IP webcam. SIGHUP = re-pick source (new upload / config change).
+#
+#   player-ctl run      supervisor loop (started by /etc/init.d/S70player)
+#   player-ctl status   print current state
+. /usr/libexec/rpi-player/common.sh
+
+HLS_DIR=/run/hls
+STATE=/run/player.state
+MEDIA_DIR=/data/media
+CACHE_DIR=$MEDIA_DIR/.cache
+TRANSCODE_PID=/run/player-transcode.pid
+VIDEO_EXT='mp4 m4v mov mkv avi ts mts m2ts webm flv mpg mpeg h264 264'
+
+FFPID=""
+RELOAD=0
+
+state() { printf '%s\n' "$@" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"; }
+
+is_video() {
+	ext=$(echo "${1##*.}" | tr 'A-Z' 'a-z')
+	for e in $VIDEO_EXT; do [ "$ext" = "$e" ] && return 0; done
+	return 1
+}
+
+# Newest video in MEDIA_DIR (or MEDIA_FILE / "current" symlink if set).
+pick_source() {
+	if [ -n "$MEDIA_FILE" ] && [ -f "$MEDIA_DIR/$MEDIA_FILE" ]; then
+		echo "$MEDIA_DIR/$MEDIA_FILE"; return
+	fi
+	if [ -e "$MEDIA_DIR/current" ]; then
+		readlink -f "$MEDIA_DIR/current"; return
+	fi
+	ls -t "$MEDIA_DIR" 2>/dev/null | while read -r f; do
+		[ -f "$MEDIA_DIR/$f" ] && is_video "$f" && { echo "$MEDIA_DIR/$f"; break; }
+	done
+}
+
+video_codec() {
+	ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
+		-of default=nw=1:nk=1 "$1" 2>/dev/null | head -n1
+}
+
+cache_name() {
+	# cache key = name + size + mtime, so a re-upload gets re-encoded
+	set -- "$1" $(stat -c '%s %Y' "$1")
+	echo "$CACHE_DIR/$(basename "$1").$2.$3.mp4"
+}
+
+# One-off conversion of non-H.264 uploads. Hardware encoder first, x264 fallback.
+start_transcode() {
+	src=$1 dst=$2
+	[ -f "$TRANSCODE_PID" ] && kill -0 "$(cat "$TRANSCODE_PID")" 2>/dev/null && return
+	(
+		rm -f "$CACHE_DIR"/*.part.mp4
+		tmp="${dst%.mp4}.part.mp4"
+		log "transcoding $src"
+		if ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -an -pix_fmt yuv420p \
+				-c:v h264_v4l2m2m -b:v 4M -g 50 "$tmp" 2>/dev/null \
+			|| ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -an -pix_fmt yuv420p \
+				-c:v libx264 -preset veryfast -crf 23 -g 50 "$tmp"; then
+			mv "$tmp" "$dst"
+			# keep only the newest cached file
+			ls -t "$CACHE_DIR"/*.mp4 2>/dev/null | tail -n +2 | xargs -r rm -f
+			log "transcode done: $dst"
+		else
+			rm -f "$tmp"
+			log "transcode FAILED: $src"
+			touch "$dst.failed"
+		fi
+		rm -f "$TRANSCODE_PID"
+		kill -HUP "$(cat /run/player-ctl.pid 2>/dev/null)" 2>/dev/null
+	) &
+	echo $! > "$TRANSCODE_PID"
+}
+
+HLS_OPTS() {
+	echo "-f hls -hls_time ${HLS_SEGMENT_SECONDS:-2} -hls_list_size ${HLS_LIST_SIZE:-6}" \
+		"-hls_flags delete_segments+temp_file+discont_start+program_date_time" \
+		"-hls_start_number_source epoch" \
+		"-hls_segment_filename $HLS_DIR/seg_%d.ts $HLS_DIR/stream.m3u8"
+}
+
+# Loop an H.264 file without re-encoding (CPU ~0).
+stream_file() {
+	# shellcheck disable=SC2046
+	ffmpeg -nostdin -v warning -re -stream_loop -1 -fflags +genpts -i "$1" \
+		-map 0:v:0 -an -c:v copy -bsf:v h264_mp4toannexb $(HLS_OPTS) &
+	FFPID=$!
+}
+
+# "No signal" picture: custom placeholder.jpg if uploaded, else SMPTE bars.
+stream_placeholder() {
+	if [ -f "$MEDIA_DIR/placeholder.jpg" ]; then
+		set -- -loop 1 -framerate 5 -i "$MEDIA_DIR/placeholder.jpg"
+	else
+		set -- -f lavfi -i "smptehdbars=size=1280x720:rate=5"
+	fi
+	# shellcheck disable=SC2046
+	ffmpeg -nostdin -v warning -re "$@" \
+		-vf "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p" \
+		-c:v libx264 -preset ultrafast -tune stillimage -g 10 $(HLS_OPTS) &
+	FFPID=$!
+}
+
+start_stream() {
+	load_env
+	src=$(pick_source)
+	if [ -z "$src" ]; then
+		state "mode=placeholder" "reason=no-media"
+		stream_placeholder; return
+	fi
+	codec=$(video_codec "$src")
+	if [ "$codec" = "h264" ]; then
+		state "mode=video" "source=$src"
+		stream_file "$src"; return
+	fi
+	if [ -z "$codec" ]; then
+		# not readable yet (upload in progress?) - placeholder, retry on next event
+		state "mode=placeholder" "reason=unreadable" "source=$src"
+		stream_placeholder; return
+	fi
+	cached=$(cache_name "$src")
+	if [ -f "$cached" ]; then
+		state "mode=video" "source=$src" "cached=$cached"
+		stream_file "$cached"; return
+	fi
+	if [ -f "$cached.failed" ]; then
+		state "mode=placeholder" "reason=transcode-failed" "source=$src"
+	else
+		state "mode=placeholder" "reason=transcoding" "source=$src" "codec=$codec"
+		start_transcode "$src" "$cached"
+	fi
+	stream_placeholder
+}
+
+stop_stream() {
+	[ -n "$FFPID" ] || return
+	kill "$FFPID" 2>/dev/null
+	wait "$FFPID" 2>/dev/null
+	FFPID=""
+}
+
+run() {
+	echo $$ > /run/player-ctl.pid
+	mkdir -p "$HLS_DIR" "$CACHE_DIR"
+	trap 'RELOAD=1; stop_stream' HUP
+	trap 'stop_stream; exit 0' TERM INT
+	while :; do
+		RELOAD=0
+		start_stream
+		rc=0
+		# wait returns early when a trapped signal arrives; keep waiting if ffmpeg lives
+		while [ -n "$FFPID" ] && kill -0 "$FFPID" 2>/dev/null; do
+			wait "$FFPID"; rc=$?
+		done
+		FFPID=""
+		if [ "$RELOAD" = 0 ]; then
+			log "ffmpeg exited ($rc), restarting"
+			sleep 2
+		fi
+		# drop segments left over from previous runs
+		find "$HLS_DIR" -name 'seg_*.ts' -mmin +2 -delete 2>/dev/null
+	done
+}
+
+case "$1" in
+	run) run ;;
+	status) cat "$STATE" 2>/dev/null ;;
+	reload) kill -HUP "$(cat /run/player-ctl.pid)" ;;
+	*) echo "Usage: $0 {run|status|reload}"; exit 1 ;;
+esac

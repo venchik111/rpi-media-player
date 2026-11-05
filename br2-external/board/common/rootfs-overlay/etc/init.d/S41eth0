@@ -1,0 +1,16 @@
+#!/bin/sh
+# Wired port: plain DHCP client in background (does not block boot without cable).
+. /usr/libexec/rpi-player/common.sh
+PID=/run/udhcpc.eth0.pid
+case "$1" in
+	start)
+		load_env
+		[ "$ETH0_DHCP" = "yes" ] || exit 0
+		ip link show eth0 >/dev/null 2>&1 || exit 0
+		ip link set eth0 up
+		udhcpc -b -S -i eth0 -p "$PID" -x hostname:"$(hostname)" >/dev/null 2>&1
+		;;
+	stop)
+		[ -f "$PID" ] && kill "$(cat "$PID")" 2>/dev/null
+		;;
+esac

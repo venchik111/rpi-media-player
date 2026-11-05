@@ -1,0 +1,11 @@
+#!/bin/sh
+# Load board-specific kernel modules listed in /etc/modules (one per line, with args).
+case "$1" in
+	start)
+		[ -f /etc/modules ] || exit 0
+		grep -v '^\s*#' /etc/modules | while read -r mod args; do
+			[ -n "$mod" ] && modprobe -q "$mod" $args
+		done
+		;;
+	stop) ;;
+esac

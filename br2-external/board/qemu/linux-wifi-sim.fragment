@@ -1,0 +1,11 @@
+# Wi-Fi stack + simulated radios for testing the access point in QEMU
+CONFIG_WIRELESS=y
+CONFIG_CFG80211=y
+CONFIG_MAC80211=y
+CONFIG_WLAN=y
+CONFIG_MAC80211_HWSIM=m
+# Network namespaces: the test client radio lives in its own netns
+CONFIG_NAMESPACES=y
+CONFIG_NET_NS=y
+CONFIG_INOTIFY_USER=y
+CONFIG_VETH=y

@@ -1,0 +1,33 @@
+#!/bin/sh
+# DHCP (and a tiny local DNS) for Wi-Fi clients.
+. /usr/libexec/rpi-player/common.sh
+CONF=/run/dnsmasq.conf
+PID=/run/dnsmasq.pid
+
+start() {
+	load_env
+	ip link show wlan0 >/dev/null 2>&1 || exit 0
+	cat > "$CONF" <<CFG
+interface=wlan0
+bind-interfaces
+except-interface=lo
+no-resolv
+no-hosts
+domain=lan
+local=/lan/
+address=/cam.lan/$AP_ADDR
+dhcp-range=$AP_DHCP_START,$AP_DHCP_END,12h
+dhcp-option=option:router,$AP_ADDR
+dhcp-option=option:dns-server,$AP_ADDR
+dhcp-leasefile=/run/dnsmasq.leases
+dhcp-authoritative
+CFG
+	start-stop-daemon -S -q -p "$PID" -x /usr/sbin/dnsmasq -- -C "$CONF" -x "$PID"
+}
+
+case "$1" in
+	start) start ;;
+	stop) start-stop-daemon -K -q -p "$PID"; rm -f "$PID" ;;
+	restart) "$0" stop; "$0" start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

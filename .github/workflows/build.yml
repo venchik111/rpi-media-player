@@ -1,0 +1,61 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [qemu, rpi4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Cache downloads and ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/work/dl
+            ${{ runner.temp }}/work/ccache
+          key: br-${{ matrix.target }}-${{ hashFiles('br2-external/configs/*', '.gitmodules') }}-${{ github.sha }}
+          restore-keys: br-${{ matrix.target }}-
+
+      - name: Builder image
+        run: docker build -t rpi-player-builder docker/
+
+      - name: Build
+        run: |
+          mkdir -p "$RUNNER_TEMP/work" && sudo chown 1000:1000 "$RUNNER_TEMP/work" && sudo chmod a+rwx . 
+          docker run --rm -v "$PWD":/src -v "$RUNNER_TEMP/work":/work -w /src rpi-player-builder \
+            scripts/build.sh ${{ matrix.target }}
+
+      - name: End-to-end tests (QEMU virt)
+        if: matrix.target == 'qemu'
+        run: |
+          docker run --rm -v "$PWD":/src -v "$RUNNER_TEMP/work":/work -w /src rpi-player-builder \
+            scripts/test.sh
+
+      - name: Boot smoke test (QEMU raspi4b)
+        if: matrix.target == 'rpi4'
+        run: |
+          docker run --rm -v "$PWD":/src -v "$RUNNER_TEMP/work":/work -w /src rpi-player-builder \
+            bash -c 'SERIAL=file:/work/raspi4b.log timeout 300 scripts/run-qemu-raspi4b.sh & 
+                     for i in $(seq 100); do grep -q "login:" /work/raspi4b.log 2>/dev/null && break; sleep 3; done;
+                     cat /work/raspi4b.log; grep -q "login:" /work/raspi4b.log'
+
+      - name: Compress image
+        if: matrix.target == 'rpi4'
+        run: xz -T0 -6 -k out/rpi4/sdcard.img
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.target == 'rpi4'
+        with:
+          name: rpi4-sdcard
+          path: out/rpi4/sdcard.img.xz

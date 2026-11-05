@@ -1,0 +1,68 @@
+#!/bin/sh
+# Wi-Fi access point: wlan0 static address + hostapd with parameters from config.
+. /usr/libexec/rpi-player/common.sh
+IFACE=wlan0
+CONF=/run/hostapd.conf
+PID=/run/hostapd.pid
+
+wait_iface() {
+	i=0
+	while ! ip link show "$IFACE" >/dev/null 2>&1; do
+		i=$((i + 1)); [ $i -gt 20 ] && return 1
+		sleep 0.5
+	done
+}
+
+gen_conf() {
+	cat > "$CONF" <<CFG
+interface=$IFACE
+driver=nl80211
+ctrl_interface=/run/hostapd
+ssid=$AP_SSID
+utf8_ssid=1
+country_code=$AP_COUNTRY
+ieee80211d=1
+hw_mode=$AP_HW_MODE
+channel=$AP_CHANNEL
+ieee80211n=1
+wmm_enabled=1
+auth_algs=1
+ignore_broadcast_ssid=${AP_HIDDEN:-0}
+CFG
+	if [ -n "$AP_PASSPHRASE" ]; then
+		cat >> "$CONF" <<CFG
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+wpa_passphrase=$AP_PASSPHRASE
+CFG
+	fi
+	chmod 0600 "$CONF"
+}
+
+start() {
+	load_env
+	if ! wait_iface; then
+		log "no $IFACE interface, access point disabled"
+		return 1
+	fi
+	iw reg set "$AP_COUNTRY" 2>/dev/null
+	ip addr flush dev "$IFACE"
+	ip addr add "$AP_ADDR/$AP_PREFIX" dev "$IFACE"
+	ip link set "$IFACE" up
+	gen_conf
+	start-stop-daemon -S -q -p "$PID" -x /usr/sbin/hostapd -- -B -P "$PID" "$CONF"
+	log "access point '$AP_SSID' on $IFACE ($AP_ADDR), channel $AP_CHANNEL"
+}
+
+stop() {
+	start-stop-daemon -K -q -p "$PID"
+	rm -f "$PID"
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart) stop; sleep 1; start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

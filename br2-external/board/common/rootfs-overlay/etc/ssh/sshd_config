@@ -1,0 +1,18 @@
+# rpi-media-player sshd configuration
+Port 22
+HostKey /data/ssh/ssh_host_ed25519_key
+HostKey /data/ssh/ssh_host_ecdsa_key
+HostKey /data/ssh/ssh_host_rsa_key
+PidFile /run/sshd.pid
+
+# Password login is on for convenience; put keys in
+# /data/ssh/authorized_keys_<user> and set PasswordAuthentication no.
+PermitRootLogin yes
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+AuthorizedKeysFile .ssh/authorized_keys /data/ssh/authorized_keys_%u
+UseDNS no
+ClientAliveInterval 30
+
+# Full file-system access over SFTP (in-process, no extra binary needed)
+Subsystem sftp internal-sftp

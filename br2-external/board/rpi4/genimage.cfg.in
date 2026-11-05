@@ -1,0 +1,31 @@
+# SD card layout. Total ~490 MB so it fits a "512 MB" card.
+image boot.vfat {
+	vfat {
+		label = "BOOT"
+		files = {
+#BOOT_FILES#
+		}
+	}
+	size = 64M
+}
+
+image sdcard.img {
+	hdimage {
+	}
+
+	partition boot {
+		partition-type = 0xC
+		bootable = "true"
+		image = "boot.vfat"
+	}
+
+	partition rootfs {
+		partition-type = 0x83
+		image = "rootfs.ext4"
+	}
+
+	partition data {
+		partition-type = 0x83
+		image = "data.ext4"
+	}
+}

@@ -1,0 +1,21 @@
+#!/bin/sh
+# OpenSSH (shell + SFTP). Host keys persist on the data partition.
+KEYDIR=/data/ssh
+PID=/run/sshd.pid
+
+start() {
+	mkdir -p "$KEYDIR" /var/empty
+	chmod 0700 "$KEYDIR"
+	for t in ed25519 ecdsa rsa; do
+		[ -f "$KEYDIR/ssh_host_${t}_key" ] || \
+			ssh-keygen -q -t "$t" -N "" -f "$KEYDIR/ssh_host_${t}_key"
+	done
+	start-stop-daemon -S -q -p "$PID" -x /usr/sbin/sshd -- -f /etc/ssh/sshd_config
+}
+
+case "$1" in
+	start) start ;;
+	stop) start-stop-daemon -K -q -p "$PID" ;;
+	restart) "$0" stop; sleep 1; "$0" start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

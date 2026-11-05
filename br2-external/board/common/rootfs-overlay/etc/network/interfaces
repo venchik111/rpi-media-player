@@ -1,0 +1,3 @@
+# Only loopback here; eth0/wlan0 are handled by /etc/init.d/S41eth0 and S42wifi-ap.
+auto lo
+iface lo inet loopback

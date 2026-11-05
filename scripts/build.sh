@@ -1,0 +1,45 @@
+#!/bin/bash
+# Build an image inside the builder container.
+#   scripts/build.sh rpi4    -> out/rpi4/sdcard.img
+#   scripts/build.sh qemu    -> out/qemu/{Image,rootfs.ext4,data.ext4}
+# Extra args go to make, e.g. "scripts/build.sh rpi4 menuconfig".
+set -euo pipefail
+
+TARGET="${1:-rpi4}"; shift || true
+SRC="${SRC:-/src}"            # repo (read from here)
+WORK="${WORK:-/work}"         # fast Linux FS: buildroot tree, output, dl cache
+BR="$WORK/buildroot"
+EXT="$WORK/br2-external"
+OUT="$WORK/output-$TARGET"
+
+case "$TARGET" in rpi4|qemu) ;; *) echo "unknown target: $TARGET" >&2; exit 1 ;; esac
+
+# Buildroot checkout on a real Linux FS (the Windows checkout breaks symlinks).
+REV=$(git -C "$SRC/buildroot" rev-parse HEAD)
+if [ ! -d "$BR/.git" ]; then
+	git clone -q --no-checkout "$SRC/buildroot" "$BR"
+fi
+if [ "$(git -C "$BR" rev-parse HEAD 2>/dev/null || true)" != "$REV" ]; then
+	git -C "$BR" fetch -q "$SRC/buildroot" "$REV"
+	git -C "$BR" checkout -q -f "$REV"
+fi
+
+# Our tree: normalise line endings / exec bits that a Windows checkout may mangle.
+rsync -a --delete "$SRC/br2-external/" "$EXT/"
+find "$EXT" -type f \( -name '*.sh' -o -path '*/init.d/*' -o -path '*/libexec/*' -o -path '*/sbin/*' \) \
+	-exec sed -i 's/\r$//' {} + -exec chmod 0755 {} +
+
+if [ ! -f "$OUT/.config" ] || [ "$EXT/configs/${TARGET}_player_defconfig" -nt "$OUT/.config" ]; then
+	make -C "$BR" O="$OUT" BR2_EXTERNAL="$EXT" "${TARGET}_player_defconfig"
+fi
+
+make -C "$OUT" "$@"
+
+if [ $# -eq 0 ]; then
+	mkdir -p "$SRC/out/$TARGET"
+	case "$TARGET" in
+		rpi4) cp "$OUT"/images/{sdcard.img,Image,bcm2711-rpi-4-b.dtb} "$SRC/out/$TARGET/" ;;
+		qemu) cp "$OUT"/images/{Image,rootfs.ext4,data.ext4} "$SRC/out/$TARGET/" ;;
+	esac
+	du -h "$SRC/out/$TARGET"/*
+fi

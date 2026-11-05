@@ -1,0 +1,40 @@
+#!/bin/sh
+# Mount BOOT (config) and data partitions, merge config into /run/rpi-player.env.
+. /usr/libexec/rpi-player/common.sh
+
+first_existing() { for d in "$@"; do [ -b "$d" ] && { echo "$d"; return 0; }; done; return 1; }
+
+start() {
+	# Pi: SD card is mmcblk0 (mmcblk1 under QEMU raspi4b). QEMU virt: vdb.
+	BOOT_DEV=$(first_existing /dev/mmcblk0p1 /dev/mmcblk1p1)
+	DATA_DEV=$(first_existing /dev/mmcblk0p3 /dev/mmcblk1p3 /dev/vdb)
+
+	if [ -n "$BOOT_DEV" ] && ! mountpoint -q /boot; then
+		mount -t vfat -o ro,noatime "$BOOT_DEV" /boot || log "cannot mount $BOOT_DEV"
+	fi
+	if [ -n "$DATA_DEV" ] && ! mountpoint -q /data; then
+		fsck.ext4 -p "$DATA_DEV" >/dev/null 2>&1
+		mount -t ext4 -o noatime "$DATA_DEV" /data || log "cannot mount $DATA_DEV, using rootfs"
+	fi
+	mkdir -p /data/media/.cache /data/ssh
+	chown media:media /data/media
+	chmod 0755 /data/media
+
+	# Defaults first, then user overrides from the BOOT partition.
+	{
+		cat /etc/rpi-player.conf.default
+		[ -f /boot/rpi-player.conf ] && tr -d '\r' < /boot/rpi-player.conf
+	} > "$ENV_FILE"
+	chmod 0600 "$ENV_FILE"
+	load_env
+
+	[ -n "$ROOT_PASSWORD" ] && echo "root:$ROOT_PASSWORD" | chpasswd >/dev/null 2>&1
+	[ -n "$MEDIA_PASSWORD" ] && echo "media:$MEDIA_PASSWORD" | chpasswd >/dev/null 2>&1
+	log "storage ready (boot=${BOOT_DEV:-none} data=${DATA_DEV:-rootfs})"
+}
+
+case "$1" in
+	start) start ;;
+	stop) sync ;;
+	*) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac

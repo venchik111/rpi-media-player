@@ -1,0 +1,6 @@
+#!/bin/sh
+# Called by inotifyd: $1=event $2=dir $3=file. Ignore hidden/cache files.
+case "$3" in .*|"") exit 0 ;; esac
+logger -t rpi-player "media change: $1 $3"
+PID=/run/player-ctl.pid
+[ -f "$PID" ] && kill -HUP "$(cat "$PID")"

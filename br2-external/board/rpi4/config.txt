@@ -1,0 +1,15 @@
+# Raspberry Pi 4B firmware config for rpi-media-player
+start_file=start4.elf
+fixup_file=fixup4.dat
+kernel=Image
+arm_64bit=1
+disable_overscan=1
+disable_splash=1
+boot_delay=0
+
+# GPU memory: the H.264 hardware encoder (bcm2835-codec) needs some
+gpu_mem=128
+
+# Serial console on GPIO14/15 (ttyAMA0); Bluetooth moved to mini-UART
+dtoverlay=miniuart-bt
+enable_uart=1
