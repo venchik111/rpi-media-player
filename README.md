@@ -1,5 +1,7 @@
 # rpi-media-player
 
+**[Документация на русском →](README.ru.md)**
+
 Minimal Linux image for **Raspberry Pi 4B** (fits a 512 MB card) that acts as a
 Wi-Fi **IP webcam**: it brings up its own access point and streams an uploaded
 video as an endless live **HLS** stream. Files are uploaded over **SFTP**.
