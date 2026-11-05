@@ -75,11 +75,11 @@ for b in /usr/sbin/hostapd /usr/sbin/dnsmasq /usr/sbin/sshd /usr/bin/ffmpeg /usr
 	/usr/sbin/lighttpd /usr/lib/lighttpd/mod_setenv.so /usr/bin/ssh-keygen /usr/sbin/iw /sbin/fsck.ext4; do
 	check "$b" exists "$b"
 done
-for s in S01storage S20modules S41eth0 S42wifi-ap S43dnsmasq S50sshd S60httpd S70player; do
+for s in S01storage S20modules S41eth0 S42wifi-ap S43dnsmasq S44sshd S60httpd S70player; do
 	mode=$(dbg "stat /etc/init.d/$s" | sed -n 's/.*Mode: *\([0-7]*\).*/\1/p')
 	[ "${mode: -3}" = 755 ] && ok "init.d/$s executable" || bad "init.d/$s mode=$mode"
 done
-for s in S50sshd.orig S50lighttpd S80dnsmasq; do
+for s in S50sshd S50lighttpd S80dnsmasq; do
 	exists "/etc/init.d/$s" && bad "stale package init script $s present" || true
 done
 check "/etc/rpi-player.conf.default" exists /etc/rpi-player.conf.default

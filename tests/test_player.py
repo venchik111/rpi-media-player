@@ -63,7 +63,7 @@ def test_segment_is_h264(vm, tmp_path):
     f.write_bytes(data)
     codec = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
                             "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(f)],
-                           capture_output=True, text=True, check=True).stdout.strip()
+                           capture_output=True, text=True, check=True).stdout.split()[0]
     assert codec == "h264"
 
 

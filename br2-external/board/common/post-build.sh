@@ -5,7 +5,8 @@ BOARD="${1:-rpi4}"
 T="${TARGET_DIR}"
 COMMON_DIR="$(dirname "$0")"
 
-# Package init scripts are replaced by ours (S5x/S6x/S7x below).
+# Package init scripts are replaced by ours (S44sshd, S60httpd, S43dnsmasq).
+# Ours must not reuse these names, or they would be deleted here too.
 rm -f "$T/etc/init.d/S50sshd" "$T/etc/init.d/S50lighttpd" "$T/etc/init.d/S80dnsmasq"
 
 # Files coming from a Windows checkout may lose the exec bit.

@@ -16,12 +16,19 @@ trap cleanup EXIT
 
 ip netns add $NS || exit 1
 iw phy "$PHY" set netns name $NS || exit 1
-CIF=$(ip netns exec $NS ls /sys/class/net | grep -v '^lo$' | head -n1)
+# the wireless interface is the one with a phy80211 link (skip lo, sit0, ...)
+CIF=$(ip netns exec $NS sh -c 'for i in /sys/class/net/*; do [ -e "$i/phy80211" ] && basename "$i"; done' | head -n1)
+[ -n "$CIF" ] || { echo "FAIL: no wireless interface in client namespace"; exit 1; }
 ip netns exec $NS ip link set lo up
 ip netns exec $NS ip link set "$CIF" up
 
 if [ -n "$AP_PASSPHRASE" ]; then
-	wpa_passphrase "$AP_SSID" "$AP_PASSPHRASE" > /run/selftest-wpa.conf
+	printf 'network={
+ ssid="%s"
+ psk="%s"
+ key_mgmt=WPA-PSK
+}
+' "$AP_SSID" "$AP_PASSPHRASE" > /run/selftest-wpa.conf
 else
 	printf 'network={\n ssid="%s"\n key_mgmt=NONE\n}\n' "$AP_SSID" > /run/selftest-wpa.conf
 fi

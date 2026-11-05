@@ -32,6 +32,22 @@ rsync -a --delete "$SRC/br2-external/" "$EXT/"
 find "$EXT" -type f \( -name '*.sh' -o -path '*/init.d/*' -o -path '*/libexec/*' -o -path '*/sbin/*' \) \
 	-exec sed -i 's/\r$//' {} + -exec chmod 0755 {} +
 
+# Raspberry Pi boot firmware: only boot/ files, via sparse blob-filtered git
+# (see br2-external/board/rpi4/local.mk). Version = the one Buildroot pins.
+if [ "$TARGET" = rpi4 ]; then
+	FW_REV=$(sed -n 's/^RPI_FIRMWARE_VERSION = //p' "$BR/package/rpi-firmware/rpi-firmware.mk")
+	FW_DIR="${BR2_DL_DIR:-$WORK/dl}/rpi-firmware-sparse"
+	if [ "$(git -C "$FW_DIR" rev-parse HEAD 2>/dev/null || true)" != "$FW_REV" ]; then
+		rm -rf "$FW_DIR"
+		git -c init.defaultBranch=main init -q "$FW_DIR"
+		git -C "$FW_DIR" remote add origin https://github.com/raspberrypi/firmware.git
+		git -C "$FW_DIR" sparse-checkout set --no-cone \
+			'/boot/*.elf' '/boot/*.dat' '/boot/bootcode.bin' '/boot/overlays/' '/boot/LICENCE.broadcom'
+		git -C "$FW_DIR" fetch -q --depth 1 --filter=blob:none origin "$FW_REV"
+		git -C "$FW_DIR" -c advice.detachedHead=false checkout -q FETCH_HEAD
+	fi
+fi
+
 if [ ! -f "$OUT/.config" ] || [ "$EXT/configs/${TARGET}_player_defconfig" -nt "$OUT/.config" ]; then
 	make -C "$BR" O="$OUT" BR2_EXTERNAL="$EXT" "${TARGET}_player_defconfig"
 fi

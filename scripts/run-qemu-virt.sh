@@ -35,5 +35,5 @@ exec qemu-system-aarch64 \
 	-append "rootwait root=/dev/vda console=ttyAMA0" \
 	"${DRIVES[@]}" \
 	-netdev user,id=eth0,hostfwd=tcp::"${SSH_PORT:-2222}"-:22,hostfwd=tcp::"${HTTP_PORT:-8080}"-:8080 \
-	-device virtio-net-pci,netdev=eth0 \
+	-device virtio-net-pci,netdev=eth0,romfile= \
 	-nographic -serial "${SERIAL:-mon:stdio}" ${QEMU_EXTRA:-}

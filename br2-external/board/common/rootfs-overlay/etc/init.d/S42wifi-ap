@@ -13,6 +13,19 @@ wait_iface() {
 	done
 }
 
+# If cfg80211 is built in, the kernel tries regulatory.db before the rootfs is
+# mounted and stays in world domain "00"; hostapd then waits forever in
+# COUNTRY_UPDATE. Reload the DB from /lib/firmware and wait for the country.
+set_country() {
+	iw reg reload 2>/dev/null
+	iw reg set "$AP_COUNTRY" 2>/dev/null
+	i=0
+	while ! iw reg get 2>/dev/null | grep -q "country $AP_COUNTRY"; do
+		i=$((i + 1)); [ $i -gt 5 ] && { log "regulatory domain $AP_COUNTRY not applied"; return; }
+		sleep 1
+	done
+}
+
 gen_conf() {
 	cat > "$CONF" <<CFG
 interface=$IFACE
@@ -46,7 +59,7 @@ start() {
 		log "no $IFACE interface, access point disabled"
 		return 1
 	fi
-	iw reg set "$AP_COUNTRY" 2>/dev/null
+	set_country
 	ip addr flush dev "$IFACE"
 	ip addr add "$AP_ADDR/$AP_PREFIX" dev "$IFACE"
 	ip link set "$IFACE" up
