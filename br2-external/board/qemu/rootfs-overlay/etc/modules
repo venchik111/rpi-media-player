@@ -1,2 +1,0 @@
-# Two simulated radios: phy0 = access point, phy1 = test client
-mac80211_hwsim radios=2

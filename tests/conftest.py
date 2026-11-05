@@ -1,5 +1,6 @@
 """Boots the QEMU 'virt' twin once per session and gives tests SSH/HTTP access."""
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -26,10 +27,40 @@ def _ssh_client():
     return c
 
 
+ROOTFS = os.environ.get("ROOTFS", "pi")
+TEST_SSID = "test-cam-from-boot"
+
+
+def _prepare_disks():
+    """Fresh copies of the disks. For the Pi rootfs, also edit rpi-player.conf on
+    the FAT BOOT partition (as a user would on a PC) to prove that it is used."""
+    src = ROOT / ("out/rpi4" if ROOTFS == "pi" else "out/qemu")
+    run = RUN_DIR / ROOTFS
+    run.mkdir(parents=True, exist_ok=True)
+    names = ["rootfs.ext4", "data.ext4"] + (["boot.vfat"] if ROOTFS == "pi" else [])
+    for n in names:
+        shutil.copyfile(src / n, run / n)
+    if ROOTFS == "pi":
+        boot = str(run / "boot.vfat")
+        conf = run / "rpi-player.conf"
+        text = subprocess.run(["mtype", "-i", boot, "::rpi-player.conf"],
+                              capture_output=True, text=True, check=True).stdout
+        assert 'AP_SSID="rpi-cam"' in text
+        text = text.replace('AP_SSID="rpi-cam"', f'AP_SSID="{TEST_SSID}"')
+        conf.write_bytes(text.replace("\n", "\r\n").encode())  # CRLF, like Notepad
+        subprocess.run(["mcopy", "-o", "-i", boot, str(conf), "::rpi-player.conf"], check=True)
+
+
+@pytest.fixture(scope="session")
+def expected_ssid():
+    return TEST_SSID if ROOTFS == "pi" else "rpi-cam"
+
+
 @pytest.fixture(scope="session")
 def vm():
     RUN_DIR.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ, FRESH="1", SERIAL=f"file:{SERIAL_LOG}",
+    _prepare_disks()
+    env = dict(os.environ, FRESH="0", ROOTFS=ROOTFS, SERIAL=f"file:{SERIAL_LOG}",
                SSH_PORT=str(SSH_PORT), HTTP_PORT=str(HTTP_PORT))
     proc = subprocess.Popen([str(ROOT / "scripts/run-qemu-virt.sh")], env=env,
                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
@@ -58,6 +89,7 @@ def vm():
 class VM:
     def __init__(self, client):
         self.ssh = client
+        self.rootfs = ROOTFS
         self.http = f"http://127.0.0.1:{HTTP_PORT}"
 
     def run(self, cmd, timeout=120):

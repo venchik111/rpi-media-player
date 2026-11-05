@@ -38,7 +38,7 @@ HLS port/segment size, file to play, passwords. Defaults:
 git clone --recurse-submodules https://github.com/venchik111/rpi-media-player
 cd rpi-media-player
 scripts/docker.sh scripts/build.sh rpi4     # -> out/rpi4/sdcard.img
-scripts/docker.sh scripts/build.sh qemu     # -> out/qemu/ (test twin)
+scripts/docker.sh scripts/build.sh qemu     # -> out/qemu/ (kernel for the virt tests)
 ```
 First build takes 1–2 h (toolchain, kernel, ffmpeg); downloads and ccache live in
 the `rpi-player-work` Docker volume, so rebuilds are fast.
@@ -55,28 +55,33 @@ config, or a `current` symlink in `/data/media`, to pin a file. `player-ctl stat
 shows what is streaming.
 
 ## Testing without hardware
-Upstream QEMU has a `raspi4b` board, but **no PCIe/USB/Ethernet and no Wi-Fi** for it
-(PCIe+GENET patches are still under review). So testing has two levels:
+No Raspberry Pi is needed to verify the image. `scripts/docker.sh scripts/test.sh` runs three
+layers, each covering what the others cannot:
 
-1. **QEMU `virt` twin** (`qemu_player_defconfig`) — same overlay and packages, upstream
-   kernel with `mac80211_hwsim` (two simulated radios: one is our AP, the other a test
-   client in a separate network namespace). Full end-to-end suite:
-   ```bash
-   scripts/docker.sh scripts/test.sh
-   ```
-   Interactive: `DOCKER_ARGS="-p 2222:2222 -p 8080:8080" scripts/docker.sh scripts/run-qemu-virt.sh`,
-   then `ssh -p 2222 root@localhost`, `vlc http://localhost:8080/stream.m3u8`.
-2. **QEMU `raspi4b`** — boots the real `sdcard.img` (kernel, DTB, partitions, init):
-   ```bash
-   scripts/docker.sh scripts/run-qemu-raspi4b.sh
-   ```
-3. Real Pi 4B — Wi-Fi chip, hardware H.264 encoder, timings.
+| Layer | What runs | Proves |
+|---|---|---|
+| `audit` | static checks of `sdcard.img` | partition table, size <= 500 MiB, Pi boot files (`start4.elf`, DTB, overlays, `config.txt`, `cmdline.txt`), **Wi-Fi firmware `brcmfmac43455`**, `brcmfmac` module + SDIO alias matching the kernel version, `regulatory.db`, binaries, init-script modes |
+| `boot` | `sdcard.img` on **QEMU `raspi4b`** (Pi kernel + BCM2711 DTB) | the real kernel boots, root/BOOT/data partitions mount, all init scripts run, login prompt |
+| `e2e` | the **exact Pi rootfs + BOOT + data partitions** on QEMU `virt` with `mac80211_hwsim` | config read from the FAT partition (CRLF edit), Wi-Fi AP comes up with that SSID/WPA2, a Wi-Fi client gets DHCP and the playlist, SFTP upload, live HLS that advances, H.264 segments, transcoding of non-H.264 uploads |
+
+Upstream QEMU `raspi4b` has no PCIe/USB/Ethernet and no Wi-Fi chip (PCIe+GENET patches are
+still under review), which is why the network part runs on `virt`. What remains unproven
+without hardware: the Broadcom radio itself accepting AP mode (standard brcmfmac + hostapd
+nl80211 setup, used widely on Pi 4) and the hardware H.264 encoder (libx264 fallback is
+automatic).
+
+```bash
+scripts/docker.sh scripts/test.sh          # all three
+scripts/docker.sh scripts/test.sh e2e      # only one layer
+```
+Interactive VM: `DOCKER_ARGS="-p 2222:2222 -p 8080:8080" scripts/docker.sh scripts/run-qemu-virt.sh`,
+then `ssh -p 2222 root@localhost`, `vlc http://localhost:8080/stream.m3u8`.
 
 ## Layout
 ```
 buildroot/            Buildroot submodule (pinned)
 br2-external/         our Buildroot tree: defconfigs, board files, rootfs overlay
 docker/Dockerfile     build + QEMU + test environment
-scripts/              build.sh, docker.sh, run-qemu-*.sh, test.sh
+scripts/              build.sh, docker.sh, run-qemu-*.sh, test.sh, audit-image.sh
 tests/                pytest end-to-end tests (run against QEMU virt)
 ```

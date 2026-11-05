@@ -3,9 +3,15 @@ CONFIG_WIRELESS=y
 CONFIG_CFG80211=y
 CONFIG_MAC80211=y
 CONFIG_WLAN=y
-CONFIG_MAC80211_HWSIM=m
+CONFIG_MAC80211_HWSIM=y
 # Network namespaces: the test client radio lives in its own netns
 CONFIG_NAMESPACES=y
 CONFIG_NET_NS=y
 CONFIG_INOTIFY_USER=y
 CONFIG_VETH=y
+# Everything built in: this kernel also boots the *Raspberry Pi* rootfs,
+# which carries no modules for it. FAT is needed for the BOOT partition.
+CONFIG_FAT_FS=y
+CONFIG_VFAT_FS=y
+CONFIG_NLS_CODEPAGE_437=y
+CONFIG_NLS_ISO8859_1=y

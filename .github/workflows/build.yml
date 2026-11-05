@@ -1,18 +1,13 @@
 name: build
 
+# Manual only: each run takes 1.5-3 h of Actions minutes on a private repo.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
   image:
     runs-on: ubuntu-24.04
-    timeout-minutes: 300
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [qemu, rpi4]
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,38 +19,40 @@ jobs:
           path: |
             ${{ runner.temp }}/work/dl
             ${{ runner.temp }}/work/ccache
-          key: br-${{ matrix.target }}-${{ hashFiles('br2-external/configs/*', '.gitmodules') }}-${{ github.sha }}
-          restore-keys: br-${{ matrix.target }}-
+          key: br-${{ hashFiles('br2-external/configs/*', '.gitmodules') }}-${{ github.sha }}
+          restore-keys: br-
 
       - name: Builder image
         run: docker build -t rpi-player-builder docker/
 
-      - name: Build
+      - name: Prepare
         run: |
-          mkdir -p "$RUNNER_TEMP/work" && sudo chown 1000:1000 "$RUNNER_TEMP/work" && sudo chmod a+rwx . 
-          docker run --rm -v "$PWD":/src -v "$RUNNER_TEMP/work":/work -w /src rpi-player-builder \
-            scripts/build.sh ${{ matrix.target }}
+          mkdir -p "$RUNNER_TEMP/work" && sudo chown 1000:1000 "$RUNNER_TEMP/work"
+          sudo chmod a+rwx .
+          echo "RUN=docker run --rm -v $PWD:/src -v $RUNNER_TEMP/work:/work -w /src rpi-player-builder" >> "$GITHUB_ENV"
 
-      - name: End-to-end tests (QEMU virt)
-        if: matrix.target == 'qemu'
-        run: |
-          docker run --rm -v "$PWD":/src -v "$RUNNER_TEMP/work":/work -w /src rpi-player-builder \
-            scripts/test.sh
+      - name: Build QEMU kernel (test twin)
+        run: $RUN scripts/build.sh qemu
 
-      - name: Boot smoke test (QEMU raspi4b)
-        if: matrix.target == 'rpi4'
-        run: |
-          docker run --rm -v "$PWD":/src -v "$RUNNER_TEMP/work":/work -w /src rpi-player-builder \
-            bash -c 'SERIAL=file:/work/raspi4b.log timeout 300 scripts/run-qemu-raspi4b.sh & 
-                     for i in $(seq 100); do grep -q "login:" /work/raspi4b.log 2>/dev/null && break; sleep 3; done;
-                     cat /work/raspi4b.log; grep -q "login:" /work/raspi4b.log'
+      - name: Build Raspberry Pi image
+        run: $RUN scripts/build.sh rpi4
+
+      - name: Audit SD image
+        run: $RUN scripts/test.sh audit
+
+      - name: Boot on QEMU raspi4b
+        run: $RUN scripts/test.sh boot
+
+      - name: End-to-end tests (Pi rootfs on QEMU virt + simulated Wi-Fi)
+        run: $RUN scripts/test.sh e2e
 
       - name: Compress image
-        if: matrix.target == 'rpi4'
-        run: xz -T0 -6 -k out/rpi4/sdcard.img
+        if: always()
+        run: test -f out/rpi4/sdcard.img && xz -T0 -6 -k out/rpi4/sdcard.img || true
 
       - uses: actions/upload-artifact@v4
-        if: matrix.target == 'rpi4'
+        if: always()
         with:
           name: rpi4-sdcard
           path: out/rpi4/sdcard.img.xz
+          if-no-files-found: ignore

@@ -77,7 +77,7 @@ start_transcode() {
 
 HLS_OPTS() {
 	echo "-f hls -hls_time ${HLS_SEGMENT_SECONDS:-2} -hls_list_size ${HLS_LIST_SIZE:-6}" \
-		"-hls_flags delete_segments+temp_file+discont_start+program_date_time" \
+		"-hls_flags delete_segments+temp_file+discont_start+omit_endlist+program_date_time" \
 		"-hls_start_number_source epoch" \
 		"-hls_segment_filename $HLS_DIR/seg_%d.ts $HLS_DIR/stream.m3u8"
 }

@@ -41,7 +41,7 @@ make -C "$OUT" "$@"
 if [ $# -eq 0 ]; then
 	mkdir -p "$SRC/out/$TARGET"
 	case "$TARGET" in
-		rpi4) cp "$OUT"/images/{sdcard.img,Image,bcm2711-rpi-4-b.dtb} "$SRC/out/$TARGET/" ;;
+		rpi4) cp "$OUT"/images/{sdcard.img,Image,bcm2711-rpi-4-b.dtb,boot.vfat,rootfs.ext4,data.ext4} "$SRC/out/$TARGET/" ;;
 		qemu) cp "$OUT"/images/{Image,rootfs.ext4,data.ext4} "$SRC/out/$TARGET/" ;;
 	esac
 	du -h "$SRC/out/$TARGET"/*

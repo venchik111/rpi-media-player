@@ -8,8 +8,8 @@ PID=/run/hostapd.pid
 wait_iface() {
 	i=0
 	while ! ip link show "$IFACE" >/dev/null 2>&1; do
-		i=$((i + 1)); [ $i -gt 20 ] && return 1
-		sleep 0.5
+		i=$((i + 1)); [ $i -gt 15 ] && return 1
+		sleep 1
 	done
 }
 

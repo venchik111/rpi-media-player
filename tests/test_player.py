@@ -14,10 +14,25 @@ def test_services_up(vm):
     assert rc == 0 and int(out.strip()) >= 5, out
 
 
-def test_access_point_uses_config(vm):
+def test_storage_mounted(vm):
+    rc, out, _ = vm.run("mount")
+    assert " on /data type ext4" in out
+    if vm.rootfs == "pi":
+        assert " on /boot type vfat" in out
+
+
+def test_access_point_uses_config(vm, expected_ssid):
+    # For the Pi rootfs the SSID was changed in BOOT:/rpi-player.conf (CRLF).
     rc, out, _ = vm.run("cat /run/hostapd.conf; ip -4 addr show wlan0")
-    assert "ssid=rpi-cam" in out and "wpa=2" in out
+    assert f"ssid={expected_ssid}\n" in out and "wpa=2" in out
     assert "192.168.50.1/24" in out
+    rc, out, _ = vm.run("iw dev wlan0 info")
+    assert "type AP" in out and f"ssid {expected_ssid}" in out
+
+
+def test_ssh_host_keys_persist_on_data(vm):
+    rc, out, _ = vm.run("ls /data/ssh")
+    assert "ssh_host_ed25519_key" in out
 
 
 def test_placeholder_before_upload(vm):

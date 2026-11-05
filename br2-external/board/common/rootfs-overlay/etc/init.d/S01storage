@@ -4,10 +4,13 @@
 
 first_existing() { for d in "$@"; do [ -b "$d" ] && { echo "$d"; return 0; }; done; return 1; }
 
+# Partition by filesystem label (genimage/mkfs set BOOT and data).
+by_label() { blkid 2>/dev/null | sed -n "s/^\(\/dev\/[^:]*\):.* LABEL=\"$1\".*/\1/p" | head -n1; }
+
 start() {
-	# Pi: SD card is mmcblk0 (mmcblk1 under QEMU raspi4b). QEMU virt: vdb.
-	BOOT_DEV=$(first_existing /dev/mmcblk0p1 /dev/mmcblk1p1)
-	DATA_DEV=$(first_existing /dev/mmcblk0p3 /dev/mmcblk1p3 /dev/vdb)
+	# Pi: SD card is mmcblk0 (mmcblk1 under QEMU raspi4b). QEMU virt: vdb=data, vdc=BOOT.
+	BOOT_DEV=$(by_label BOOT); [ -n "$BOOT_DEV" ] || BOOT_DEV=$(first_existing /dev/mmcblk0p1 /dev/mmcblk1p1 /dev/vdc)
+	DATA_DEV=$(by_label data); [ -n "$DATA_DEV" ] || DATA_DEV=$(first_existing /dev/mmcblk0p3 /dev/mmcblk1p3 /dev/vdb)
 
 	if [ -n "$BOOT_DEV" ] && ! mountpoint -q /boot; then
 		mount -t vfat -o ro,noatime "$BOOT_DEV" /boot || log "cannot mount $BOOT_DEV"

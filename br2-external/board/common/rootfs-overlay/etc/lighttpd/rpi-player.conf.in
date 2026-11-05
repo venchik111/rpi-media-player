@@ -12,7 +12,11 @@ mimetype.assign = (
 	".ts"   => "video/mp2t",
 	".html" => "text/html; charset=utf-8",
 )
-setenv.add-response-header = ( "Access-Control-Allow-Origin" => "*" )
+setenv.set-response-header = ( "Access-Control-Allow-Origin" => "*" )
+# Live playlist must never be cached (segments may be).
 $HTTP["url"] =~ "\.m3u8$" {
-	setenv.add-response-header += ( "Cache-Control" => "no-cache, no-store" )
+	setenv.set-response-header = (
+		"Access-Control-Allow-Origin" => "*",
+		"Cache-Control" => "no-cache, no-store",
+	)
 }
