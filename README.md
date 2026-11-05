@@ -47,6 +47,19 @@ the `rpi-player-work` Docker volume, so rebuilds are fast.
 
 Flash `out/rpi4/sdcard.img` with Raspberry Pi Imager ("Use custom") or `dd`.
 
+### Bigger card = more room for video
+The image works on any card >= 512 MB, but the `data` partition (videos) is a fixed
+200 MB. On a bigger card, grow it to the end of the card after flashing, e.g. with
+GParted (resize the last ext4 partition labelled `data`) or from a shell
+(replace `sdX` with the card, double-check with `lsblk`):
+```bash
+sudo parted /dev/sdX resizepart 3 100%
+```
+```bash
+sudo e2fsck -f /dev/sdX3 && sudo resize2fs /dev/sdX3
+```
+Videos and settings are kept. See [README.ru.md](README.ru.md) for a step-by-step guide.
+
 ## Upload and watch
 ```bash
 sftp media@192.168.50.1        # put movie.mp4
