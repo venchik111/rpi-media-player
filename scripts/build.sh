@@ -17,11 +17,14 @@ case "$TARGET" in rpi4|qemu) ;; *) echo "unknown target: $TARGET" >&2; exit 1 ;;
 # Buildroot checkout on a real Linux FS (the Windows checkout breaks symlinks).
 REV=$(git -C "$SRC/buildroot" rev-parse HEAD)
 if [ ! -d "$BR/.git" ]; then
-	git clone -q --no-checkout "$SRC/buildroot" "$BR"
+	git -c init.defaultBranch=main clone -q --no-checkout "$SRC/buildroot" "$BR"
 fi
 if [ "$(git -C "$BR" rev-parse HEAD 2>/dev/null || true)" != "$REV" ]; then
 	git -C "$BR" fetch -q "$SRC/buildroot" "$REV"
-	git -C "$BR" checkout -q -f "$REV"
+	git -C "$BR" reset -q --hard "$REV"
+fi
+if [ ! -f "$BR/Makefile" ]; then
+	git -C "$BR" reset -q --hard "$REV"
 fi
 
 # Our tree: normalise line endings / exec bits that a Windows checkout may mangle.

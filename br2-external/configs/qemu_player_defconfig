@@ -32,7 +32,6 @@ BR2_PACKAGE_WIRELESS_REGDB=y
 
 # --- Packages (keep in sync with qemu_player_defconfig) ---
 BR2_PACKAGE_KMOD=y
-BR2_PACKAGE_KMOD_TOOLS=y
 BR2_PACKAGE_HOST_KMOD_XZ=y
 BR2_PACKAGE_XZ=y
 BR2_PACKAGE_E2FSPROGS=y
