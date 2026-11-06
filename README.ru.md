@@ -1,6 +1,6 @@
 # rpi-media-player
 
-[English version](README.md)
+[English version](README.md) · **[Полная документация](docs/README.md)**
 
 ## Что это такое
 
