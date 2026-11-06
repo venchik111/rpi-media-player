@@ -1,0 +1,12 @@
+#!/bin/sh
+# Optional boot diagnostics: DIAG_LOG="yes" in rpi-player.conf writes a report to
+# the BOOT partition, readable on any PC. For boards with no screen or network.
+. /usr/libexec/rpi-player/common.sh
+case "$1" in
+	start)
+		load_env
+		[ "$DIAG_LOG" = "yes" ] || exit 0
+		/usr/libexec/rpi-player/diag </dev/null >/dev/null 2>&1 &
+		;;
+	stop) ;;
+esac

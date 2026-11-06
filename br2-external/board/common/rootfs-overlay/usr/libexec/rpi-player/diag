@@ -1,0 +1,65 @@
+#!/bin/sh
+# Writes /boot/rpi-player-diag.txt at several moments after boot, so a partial
+# report survives if something later hangs or the power is cut.
+OUT=/boot/rpi-player-diag.txt
+TMP=/run/rpi-player-diag.txt
+mountpoint -q /boot || exit 1
+
+save() {
+	mount -o remount,rw /boot || return
+	cp "$TMP" "$OUT"
+	sync
+	mount -o remount,ro /boot
+}
+section() { echo; echo "===== $1"; shift; "$@" 2>&1; }
+mask() { sed -E 's/^(wpa_passphrase=).*/\1***/; s/^(AP_PASSPHRASE|ROOT_PASSWORD|MEDIA_PASSWORD)=.*/\1=***/'; }
+
+snapshot() {
+	section "stage: $1, uptime" cat /proc/uptime
+	section "ip" ip -br addr
+	section "iw dev" iw dev
+	section "iw reg get" iw reg get
+	section "wireless modes" sh -c "iw list | sed -n '/Supported interface modes/,/Band 1/p'"
+	section "processes" ps
+	section "player" player-ctl status
+}
+
+{
+	echo "rpi-media-player diagnostics"
+	section "kernel" uname -a
+	section "cmdline" cat /proc/cmdline
+	section "mounts" mount
+	section "sdio devices" sh -c 'for d in /sys/bus/sdio/devices/*; do echo "$d: $(cat "$d/modalias" 2>/dev/null)"; done'
+	section "firmware" sh -c 'ls -l /lib/firmware/brcm | grep -E "raspberrypi,4-model-b|43455-sdio\.(bin|txt|clm)"; ls -l /lib/firmware/cypress | grep 43455; ls -l /lib/firmware/regulatory*'
+	section "modprobe brcmfmac" modprobe -v brcmfmac
+} > "$TMP"
+save
+
+sleep 30
+snapshot "30s" >> "$TMP"
+save
+
+sleep 30
+{
+	snapshot "60s"
+	section "modules" lsmod
+	section "rfkill" sh -c 'for r in /sys/class/rfkill/*; do echo "$r: $(cat "$r/name") soft=$(cat "$r/soft") hard=$(cat "$r/hard")"; done'
+	section "hostapd.conf" cat /run/hostapd.conf | mask
+	section "dmesg" dmesg
+	section "messages" tail -n 200 /var/log/messages
+} >> "$TMP"
+save
+
+# Restart the access point with debug output to see why it fails.
+{
+	/etc/init.d/S42wifi-ap stop
+	sleep 1
+	section "hostapd -d (20s)" timeout 20 hostapd -d /run/hostapd.conf
+	/etc/init.d/S42wifi-ap start
+	sleep 5
+	section "dmesg tail after restart" sh -c 'dmesg | tail -n 40'
+	snapshot "after AP restart"
+	echo; echo "===== report complete"
+} >> "$TMP" 2>&1
+mask < "$TMP" > "$TMP.m" && mv "$TMP.m" "$TMP"
+save
