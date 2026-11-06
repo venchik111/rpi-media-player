@@ -56,13 +56,12 @@ jobs:
       - name: End-to-end tests (Pi rootfs on QEMU virt + simulated Wi-Fi)
         run: $RUN scripts/test.sh e2e
 
+      # out/ is owned by the container user, hence sudo. Missing image = failed run.
       - name: Compress image
-        if: always()
-        run: test -f out/rpi4/sdcard.img && xz -T0 -6 -k out/rpi4/sdcard.img || true
+        run: sudo xz -T0 -6 -k out/rpi4/sdcard.img
 
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: rpi4-sdcard
           path: out/rpi4/sdcard.img.xz
-          if-no-files-found: ignore
+          if-no-files-found: error

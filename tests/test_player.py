@@ -76,6 +76,55 @@ def test_non_h264_upload_is_transcoded(vm, media):
     assert st["mode"] == "video" and st["source"].endswith("clip_mpeg4.avi")
 
 
+def stream_codecs(vm, tmp_path):
+    """Codecs in the newest live segment, e.g. {"h264", "aac"}."""
+    text = vm.get("/stream.m3u8").text
+    seg = [l for l in text.splitlines() if l.endswith(".ts")][-1]
+    f = tmp_path / "live.ts"
+    f.write_bytes(vm.get("/" + seg).content)
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_name",
+                          "-of", "csv=p=0", str(f)], capture_output=True, text=True).stdout
+    return set(out.replace(",", " ").split())
+
+
+def test_aac_sound_is_in_the_stream(vm, media, tmp_path):
+    vm.upload(media["aac"], "/data/media/clip_aac.mp4")
+    vm.wait_for(lambda: vm.state().get("source") == "/data/media/clip_aac.mp4", timeout=60)
+    assert vm.wait_for(lambda: stream_codecs(vm, tmp_path) == {"h264", "aac"}, timeout=60)
+
+
+def test_other_sound_formats_become_aac(vm, media, tmp_path):
+    vm.upload(media["ac3"], "/data/media/clip_ac3.mkv")
+    st = vm.wait_for(lambda: vm.state().get("cached") and vm.state().get("source", "").endswith("clip_ac3.mkv")
+                     and vm.state(), timeout=120)
+    assert st["mode"] == "video"
+    assert vm.wait_for(lambda: stream_codecs(vm, tmp_path) == {"h264", "aac"}, timeout=60)
+
+
+def test_failed_uploads_keep_the_stream_running(vm, media):
+    vm.upload(media["aac"], "/data/media/good.mp4")
+    vm.wait_for(lambda: vm.state().get("source") == "/data/media/good.mp4", timeout=60)
+    _, ffmpeg_before, _ = vm.run("pidof ffmpeg")
+    first = media_sequence(vm.get("/stream.m3u8").text)
+
+    for name in ("broken_no_index", "broken_with_index"):
+        vm.upload(media[name], f"/data/media/{name}.mp4")
+        time.sleep(1.5)  # newer mtime than the previous file
+    time.sleep(6)
+
+    st = vm.state()
+    assert st["mode"] == "video" and st["source"] == "/data/media/good.mp4", st
+    _, ffmpeg_after, _ = vm.run("pidof ffmpeg")
+    assert ffmpeg_after == ffmpeg_before  # same video, stream not restarted
+    assert media_sequence(vm.get("/stream.m3u8").text) > first
+
+
+def test_nothing_is_deleted_automatically(vm):
+    _, out, _ = vm.run("ls /data/media")
+    for name in ("clip_h264.mp4", "clip_aac.mp4", "good.mp4", "broken_no_index.mp4", "broken_with_index.mp4"):
+        assert name in out, out
+
+
 def test_index_page(vm):
     assert "stream.m3u8" in vm.get("/").text
 

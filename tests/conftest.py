@@ -138,4 +138,23 @@ def media(tmp_path_factory):
                     "-t", "6", "-c:v", "libx264", "-g", "25", "-pix_fmt", "yuv420p", str(h264)], check=True)
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25",
                     "-t", "4", "-c:v", "mpeg4", str(mpeg4)], check=True)
-    return {"h264": h264, "mpeg4": mpeg4}
+    aac = d / "clip_aac.mp4"
+    ac3 = d / "clip_ac3.mkv"
+    faststart = d / "faststart.mp4"
+    av = ["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25", "-f", "lavfi", "-i", "sine=frequency=440",
+          "-t", "6", "-c:v", "libx264", "-g", "25", "-pix_fmt", "yuv420p"]
+    ff = ["ffmpeg", "-v", "error", "-y"]
+    subprocess.run(ff + av + ["-c:a", "aac", str(aac)], check=True)
+    subprocess.run(ff + av + ["-c:a", "ac3", str(ac3)], check=True)
+    subprocess.run(ff + av + ["-c:a", "aac", "-movflags", "+faststart", str(faststart)], check=True)
+
+    # Uploads cut in half: index at the end (lost) and at the start (still readable).
+    def cut(src, name):
+        out = d / name
+        data = src.read_bytes()
+        out.write_bytes(data[:len(data) // 2])
+        return out
+
+    return {"h264": h264, "mpeg4": mpeg4, "aac": aac, "ac3": ac3,
+            "broken_no_index": cut(aac, "broken_no_index.mp4"),
+            "broken_with_index": cut(faststart, "broken_with_index.mp4")}

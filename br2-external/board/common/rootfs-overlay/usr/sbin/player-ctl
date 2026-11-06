@@ -2,6 +2,10 @@
 # player-ctl: keeps a live HLS stream in /run/hls, looping the uploaded video
 # like an IP webcam. SIGHUP = re-pick source (new upload / config change).
 #
+# Source choice: the newest file in /data/media that reads as a complete video.
+# A failed or broken upload is skipped, so the stream keeps its current video.
+# Files are never deleted here; only the conversion cache is managed.
+#
 #   player-ctl run      supervisor loop (started by /etc/init.d/S70player)
 #   player-ctl status   print current state
 . /usr/libexec/rpi-player/common.sh
@@ -11,10 +15,12 @@ STATE=/run/player.state
 MEDIA_DIR=/data/media
 CACHE_DIR=$MEDIA_DIR/.cache
 TRANSCODE_PID=/run/player-transcode.pid
+CANDIDATES=/run/player.candidates
 VIDEO_EXT='mp4 m4v mov mkv avi ts mts m2ts webm flv mpg mpeg h264 264'
 
 FFPID=""
 RELOAD=0
+CUR_KEY=""
 
 state() { printf '%s\n' "$@" > "$STATE.tmp" && mv "$STATE.tmp" "$STATE"; }
 
@@ -24,55 +30,119 @@ is_video() {
 	return 1
 }
 
-# Newest video in MEDIA_DIR (or MEDIA_FILE / "current" symlink if set).
-pick_source() {
+# Pinned file first (MEDIA_FILE / "current" symlink), then videos, newest first.
+candidates() {
 	if [ -n "$MEDIA_FILE" ] && [ -f "$MEDIA_DIR/$MEDIA_FILE" ]; then
-		echo "$MEDIA_DIR/$MEDIA_FILE"; return
+		echo "$MEDIA_DIR/$MEDIA_FILE"
 	fi
 	if [ -e "$MEDIA_DIR/current" ]; then
-		readlink -f "$MEDIA_DIR/current"; return
+		readlink -f "$MEDIA_DIR/current"
 	fi
 	ls -t "$MEDIA_DIR" 2>/dev/null | while read -r f; do
-		[ -f "$MEDIA_DIR/$f" ] && is_video "$f" && { echo "$MEDIA_DIR/$f"; break; }
+		[ -f "$MEDIA_DIR/$f" ] && is_video "$f" && echo "$MEDIA_DIR/$f"
 	done
 }
 
-video_codec() {
-	ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
-		-of default=nw=1:nk=1 "$1" 2>/dev/null | head -n1
+stream_codec() { # $1 = v|a, $2 = file
+	ffprobe -v error -select_streams "$1:0" -show_entries stream=codec_name \
+		-of default=nw=1:nk=1 "$2" 2>/dev/null </dev/null | head -n1
 }
 
-cache_name() {
-	# cache key = name + size + mtime, so a re-upload gets re-encoded
-	set -- "$1" $(stat -c '%s %Y' "$1")
-	echo "$CACHE_DIR/$(basename "$1").$2.$3.mp4"
+# An MP4 cut short can still have a valid header (moov at the start). Reading all
+# packets (no decoding, so only disk time) then reports "partial file". Seeking to
+# the end with -sseof does not detect this.
+is_complete() {
+	! ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -c copy -f null - 2>&1 </dev/null \
+		| grep -q 'partial file'
 }
 
-# One-off conversion of non-H.264 uploads. Hardware encoder first, x264 fallback.
+# Size + mtime: detects a re-upload under the same name.
+file_sig() { stat -c '%s.%Y' "$1" 2>/dev/null; }
+
+cache_name() { echo "$CACHE_DIR/$(basename "$1").$(file_sig "$1").mp4"; }
+
+# One-off conversion: video to H.264 unless it already is, audio to AAC.
+# Hardware encoder first, x264 fallback.
 start_transcode() {
-	src=$1 dst=$2
+	src=$1 dst=$2 vcodec=$3
 	[ -f "$TRANSCODE_PID" ] && kill -0 "$(cat "$TRANSCODE_PID")" 2>/dev/null && return
 	(
 		rm -f "$CACHE_DIR"/*.part.mp4
 		tmp="${dst%.mp4}.part.mp4"
-		log "transcoding $src"
-		if ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -an -pix_fmt yuv420p \
-				-c:v h264_v4l2m2m -b:v 4M -g 50 "$tmp" 2>/dev/null \
-			|| ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -an -pix_fmt yuv420p \
-				-c:v libx264 -preset veryfast -crf 23 -g 50 "$tmp"; then
+		audio="-map 0:a:0? -c:a aac -b:a 128k"
+		log "converting $src"
+		if [ "$vcodec" = "h264" ]; then
+			# shellcheck disable=SC2086
+			ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -c:v copy $audio "$tmp"
+		else
+			# shellcheck disable=SC2086
+			ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -pix_fmt yuv420p \
+					-c:v h264_v4l2m2m -b:v 4M -g 50 $audio "$tmp" 2>/dev/null \
+				|| ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -pix_fmt yuv420p \
+					-c:v libx264 -preset veryfast -crf 23 -g 50 $audio "$tmp"
+		fi
+		if [ $? -eq 0 ]; then
 			mv "$tmp" "$dst"
 			# keep only the newest cached file
 			ls -t "$CACHE_DIR"/*.mp4 2>/dev/null | tail -n +2 | xargs -r rm -f
-			log "transcode done: $dst"
+			log "conversion done: $dst"
 		else
 			rm -f "$tmp"
-			log "transcode FAILED: $src"
+			log "conversion FAILED: $src"
 			touch "$dst.failed"
 		fi
 		rm -f "$TRANSCODE_PID"
 		kill -HUP "$(cat /run/player-ctl.pid 2>/dev/null)" 2>/dev/null
-	) &
+	) </dev/null &
 	echo $! > "$TRANSCODE_PID"
+}
+
+# Decide what to play. Sets PLAN_FILE (empty = placeholder), PLAN_KEY, PLAN_STATE.
+plan() {
+	load_env
+	PLAN_FILE=""; plan_src=""; plan_cached=""; pending=""; skipped=""
+	candidates > "$CANDIDATES"
+	while IFS= read -r f; do
+		vcodec=$(stream_codec v "$f")
+		if [ -z "$vcodec" ] || ! is_complete "$f"; then
+			skipped="$f"
+			log "skipping unreadable or incomplete file: $f"
+			continue
+		fi
+		acodec=$(stream_codec a "$f")
+		if [ "$vcodec" = "h264" ] && { [ -z "$acodec" ] || [ "$acodec" = "aac" ]; }; then
+			PLAN_FILE=$f; plan_src=$f
+			break
+		fi
+		cached=$(cache_name "$f")
+		if [ -f "$cached" ]; then
+			PLAN_FILE=$cached; plan_src=$f; plan_cached=$cached
+			break
+		fi
+		if [ -f "$cached.failed" ]; then
+			skipped="$f"
+			continue
+		fi
+		# Being converted: an older video (if any) stays on air meanwhile.
+		[ -n "$pending" ] || pending=$f
+		start_transcode "$f" "$cached" "$vcodec"
+	done < "$CANDIDATES"
+
+	if [ -n "$PLAN_FILE" ]; then
+		PLAN_KEY="$PLAN_FILE|$(file_sig "$PLAN_FILE")"
+		set -- "mode=video" "source=$plan_src"
+		[ -n "$plan_cached" ] && set -- "$@" "cached=$plan_cached"
+	else
+		PLAN_KEY="placeholder|$(file_sig "$MEDIA_DIR/placeholder.jpg")"
+		if [ -n "$pending" ]; then reason=converting
+		elif [ -n "$skipped" ]; then reason=unreadable
+		else reason=no-media
+		fi
+		set -- "mode=placeholder" "reason=$reason"
+	fi
+	[ -n "$pending" ] && set -- "$@" "pending=$pending"
+	[ -n "$skipped" ] && set -- "$@" "skipped=$skipped"
+	state "$@"
 }
 
 HLS_OPTS() {
@@ -82,11 +152,11 @@ HLS_OPTS() {
 		"-hls_segment_filename $HLS_DIR/seg_%d.ts $HLS_DIR/stream.m3u8"
 }
 
-# Loop an H.264 file without re-encoding (CPU ~0).
+# Loop an H.264 (+AAC) file without re-encoding (CPU ~0).
 stream_file() {
 	# shellcheck disable=SC2046
 	ffmpeg -nostdin -v warning -re -stream_loop -1 -fflags +genpts -i "$1" \
-		-map 0:v:0 -an -c:v copy -bsf:v h264_mp4toannexb $(HLS_OPTS) &
+		-map 0:v:0 -map '0:a:0?' -c:v copy -c:a copy -bsf:v h264_mp4toannexb $(HLS_OPTS) &
 	FFPID=$!
 }
 
@@ -104,64 +174,51 @@ stream_placeholder() {
 	FFPID=$!
 }
 
-start_stream() {
-	load_env
-	src=$(pick_source)
-	if [ -z "$src" ]; then
-		state "mode=placeholder" "reason=no-media"
-		stream_placeholder; return
-	fi
-	codec=$(video_codec "$src")
-	if [ "$codec" = "h264" ]; then
-		state "mode=video" "source=$src"
-		stream_file "$src"; return
-	fi
-	if [ -z "$codec" ]; then
-		# not readable yet (upload in progress?) - placeholder, retry on next event
-		state "mode=placeholder" "reason=unreadable" "source=$src"
-		stream_placeholder; return
-	fi
-	cached=$(cache_name "$src")
-	if [ -f "$cached" ]; then
-		state "mode=video" "source=$src" "cached=$cached"
-		stream_file "$cached"; return
-	fi
-	if [ -f "$cached.failed" ]; then
-		state "mode=placeholder" "reason=transcode-failed" "source=$src"
-	else
-		state "mode=placeholder" "reason=transcoding" "source=$src" "codec=$codec"
-		start_transcode "$src" "$cached"
-	fi
-	stream_placeholder
+start_plan() {
+	CUR_KEY=$PLAN_KEY
+	if [ -n "$PLAN_FILE" ]; then stream_file "$PLAN_FILE"; else stream_placeholder; fi
 }
+
+stream_alive() { [ -n "$FFPID" ] && kill -0 "$FFPID" 2>/dev/null; }
 
 stop_stream() {
 	[ -n "$FFPID" ] || return
 	kill "$FFPID" 2>/dev/null
-	wait "$FFPID" 2>/dev/null
+	# a signal can interrupt wait; make sure this ffmpeg is really gone
+	while kill -0 "$FFPID" 2>/dev/null; do wait "$FFPID" 2>/dev/null; done
 	FFPID=""
 }
 
 run() {
 	echo $$ > /run/player-ctl.pid
 	mkdir -p "$HLS_DIR" "$CACHE_DIR"
-	trap 'RELOAD=1; stop_stream' HUP
+	trap 'RELOAD=1' HUP
 	trap 'stop_stream; exit 0' TERM INT
+	plan
+	start_plan
 	while :; do
-		RELOAD=0
-		start_stream
 		rc=0
-		# wait returns early when a trapped signal arrives; keep waiting if ffmpeg lives
-		while [ -n "$FFPID" ] && kill -0 "$FFPID" 2>/dev/null; do
-			wait "$FFPID"; rc=$?
-		done
-		FFPID=""
-		if [ "$RELOAD" = 0 ]; then
+		# wait returns early when a trapped signal arrives
+		[ "$RELOAD" = 1 ] || { wait "$FFPID"; rc=$?; }
+		if [ "$RELOAD" = 1 ]; then
+			RELOAD=0
+			plan
+			# Same video still playing (e.g. a failed upload): do not touch the stream.
+			if [ "$PLAN_KEY" = "$CUR_KEY" ] && stream_alive; then
+				continue
+			fi
+			stop_stream
+		elif stream_alive; then
+			continue
+		else
+			FFPID=""
 			log "ffmpeg exited ($rc), restarting"
 			sleep 2
+			plan
 		fi
 		# drop segments left over from previous runs
 		find "$HLS_DIR" -name 'seg_*.ts' -mmin +2 -delete 2>/dev/null
+		start_plan
 	done
 }
 

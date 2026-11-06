@@ -18,7 +18,7 @@ phone/laptop ──Wi-Fi "rpi-cam"──▶ Pi 4B ──▶ http://192.168.50.1:
 | OS | Buildroot 2026.02.3 (LTS), BusyBox init, glibc, RPi kernel |
 | Access point | hostapd (`wlan0`, brcmfmac) + dnsmasq DHCP, params from `rpi-player.conf` |
 | SSH / SFTP | OpenSSH, `internal-sftp`, full file-system access, host keys kept on `/data` |
-| Stream | `player-ctl`: ffmpeg loops the newest file in `/data/media` into a live HLS window (`-c copy` for H.264, one-off transcode otherwise), lighttpd on :8080 |
+| Stream | `player-ctl`: ffmpeg loops the newest file in `/data/media` into a live HLS window (`-c copy` for H.264 + AAC, one-off conversion otherwise; incomplete files are skipped), lighttpd on :8080 |
 | No video yet | "no signal" SMPTE bars (or your own `/data/media/placeholder.jpg`) |
 
 SD card layout (`sdcard.img`, ~470 MB): `BOOT` FAT 64 MB (firmware, kernel, **`rpi-player.conf`**),
@@ -65,7 +65,9 @@ Videos and settings are kept. See [README.ru.md](README.ru.md) for a step-by-ste
 sftp media@192.168.50.1        # put movie.mp4
 vlc http://192.168.50.1:8080/stream.m3u8
 ```
-The newest upload starts playing automatically (inotify). Set `MEDIA_FILE` in the
+The newest complete upload starts playing automatically (inotify). Older files are kept;
+a failed or unreadable upload is skipped and the current video keeps playing. Prefer a new
+file name: uploading under the same name overwrites the old clip. Set `MEDIA_FILE` in the
 config, or a `current` symlink in `/data/media`, to pin a file. `player-ctl status`
 shows what is streaming.
 
@@ -77,7 +79,7 @@ layers, each covering what the others cannot:
 |---|---|---|
 | `audit` | static checks of `sdcard.img` | partition table, size <= 500 MiB, Pi boot files (`start4.elf`, DTB, overlays, `config.txt`, `cmdline.txt`), **Wi-Fi firmware `brcmfmac43455`**, `brcmfmac` module + SDIO alias matching the kernel version, `regulatory.db`, binaries, init-script modes |
 | `boot` | `sdcard.img` on **QEMU `raspi4b`** (Pi kernel + BCM2711 DTB) | the real kernel boots, root/BOOT/data partitions mount, all init scripts run, login prompt |
-| `e2e` | the **exact Pi rootfs + BOOT + data partitions** on QEMU `virt` with `mac80211_hwsim` | config read from the FAT partition (CRLF edit), Wi-Fi AP comes up with that SSID/WPA2, a Wi-Fi client gets DHCP and the playlist, SFTP upload, live HLS that advances, H.264 segments, transcoding of non-H.264 uploads |
+| `e2e` | the **exact Pi rootfs + BOOT + data partitions** on QEMU `virt` with `mac80211_hwsim` | config read from the FAT partition (CRLF edit), Wi-Fi AP comes up with that SSID/WPA2, a Wi-Fi client gets DHCP and the playlist, SFTP upload, live HLS that advances, H.264 + AAC segments, conversion of other formats, failed uploads do not disturb the stream |
 
 Upstream QEMU `raspi4b` has no PCIe/USB/Ethernet and no Wi-Fi chip (PCIe+GENET patches are
 still under review), which is why the network part runs on `virt`. What remains unproven
