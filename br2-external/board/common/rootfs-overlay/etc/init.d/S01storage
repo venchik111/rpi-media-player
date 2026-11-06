@@ -7,7 +7,25 @@ first_existing() { for d in "$@"; do [ -b "$d" ] && { echo "$d"; return 0; }; do
 # Partition by filesystem label (genimage/mkfs set BOOT and data).
 by_label() { blkid 2>/dev/null | sed -n "s/^\(\/dev\/[^:]*\):.* LABEL=\"$1\".*/\1/p" | head -n1; }
 
+# The Pi has no battery-backed clock: every boot starts from the same old time.
+# Never go below the build time, and after mounting data move past the newest
+# file, otherwise a new upload could look older than previous ones.
+clock_floor() { # $1 = minimum time, epoch seconds
+	[ -n "$1" ] || return
+	[ "$1" -gt "$(date +%s)" ] && date -s "@$1" >/dev/null 2>&1
+}
+
+newest_media_time() {
+	newest=0
+	for f in /data/media/* /data/media/.cache/*; do
+		t=$(stat -c %Y "$f" 2>/dev/null) || continue
+		[ "$t" -gt "$newest" ] && newest=$t
+	done
+	echo "$newest"
+}
+
 start() {
+	clock_floor "$(cat /etc/rpi-player.buildtime 2>/dev/null)"
 	# Pi: SD card is mmcblk0 (mmcblk1 under QEMU raspi4b), USB drive is sda. QEMU virt: vdb=data, vdc=BOOT.
 	BOOT_DEV=$(by_label BOOT); [ -n "$BOOT_DEV" ] || BOOT_DEV=$(first_existing /dev/mmcblk0p1 /dev/mmcblk1p1 /dev/sda1 /dev/vdc)
 	DATA_DEV=$(by_label data); [ -n "$DATA_DEV" ] || DATA_DEV=$(first_existing /dev/mmcblk0p3 /dev/mmcblk1p3 /dev/sda3 /dev/vdb)
@@ -20,6 +38,7 @@ start() {
 		mount -t ext4 -o noatime "$DATA_DEV" /data || log "cannot mount $DATA_DEV, using rootfs"
 	fi
 	mkdir -p /data/media/.cache /data/ssh
+	clock_floor "$(newest_media_time)"
 	chown media:media /data/media
 	chmod 0755 /data/media
 

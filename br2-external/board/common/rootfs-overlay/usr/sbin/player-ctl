@@ -61,8 +61,8 @@ file_sig() { stat -c '%s.%Y' "$1" 2>/dev/null; }
 
 cache_name() { echo "$CACHE_DIR/$(basename "$1").$(file_sig "$1").mp4"; }
 
-# One-off conversion: video to H.264 unless it already is, audio to AAC.
-# Hardware encoder first, x264 fallback.
+# One-off conversion: video to H.264 unless it already is, audio to AAC. Software
+# x264 only: it behaves the same everywhere; the hardware encoder is unverified.
 start_transcode() {
 	src=$1 dst=$2 vcodec=$3
 	[ -f "$TRANSCODE_PID" ] && kill -0 "$(cat "$TRANSCODE_PID")" 2>/dev/null && return
@@ -77,9 +77,7 @@ start_transcode() {
 		else
 			# shellcheck disable=SC2086
 			ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -pix_fmt yuv420p \
-					-c:v h264_v4l2m2m -b:v 4M -g 50 $audio "$tmp" 2>/dev/null \
-				|| ffmpeg -nostdin -v error -y -i "$src" -map 0:v:0 -pix_fmt yuv420p \
-					-c:v libx264 -preset veryfast -crf 23 -g 50 $audio "$tmp"
+				-c:v libx264 -preset veryfast -crf 23 -g 50 $audio "$tmp"
 		fi
 		if [ $? -eq 0 ]; then
 			mv "$tmp" "$dst"

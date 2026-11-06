@@ -10,8 +10,11 @@ def media_sequence(text):
 
 
 def test_services_up(vm):
-    rc, out, _ = vm.run("pidof sshd hostapd dnsmasq lighttpd ffmpeg | wc -w")
-    assert rc == 0 and int(out.strip()) >= 5, out
+    # the access point starts in the background, it can come up after sshd
+    def all_up():
+        _, out, _ = vm.run("pidof sshd hostapd dnsmasq lighttpd ffmpeg | wc -w")
+        return int(out.strip()) >= 5
+    assert vm.wait_for(all_up, timeout=90)
 
 
 def test_storage_mounted(vm):
@@ -25,6 +28,7 @@ def test_access_point_uses_config(vm, expected_ssid):
     # For the Pi rootfs the SSID was changed in BOOT:/rpi-player.conf (CRLF).
     rc, out, _ = vm.run("cat /run/hostapd.conf; ip -4 addr show wlan0")
     assert f"ssid={expected_ssid}\n" in out and "wpa=2" in out
+    assert "ieee80211n=1" in out  # the configured parameters, not the basic fallback
     assert "192.168.50.1/24" in out
     rc, out, _ = vm.run("iw dev wlan0 info")
     assert "type AP" in out and f"ssid {expected_ssid}" in out

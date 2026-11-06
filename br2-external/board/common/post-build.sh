@@ -17,6 +17,9 @@ install -D -m 0644 "$COMMON_DIR/rpi-player.conf" "$T/etc/rpi-player.conf.default
 
 echo "$BOARD" > "$T/etc/rpi-player.board"
 
+# Lower bound for the clock on boards without a battery-backed RTC (see S01storage).
+date +%s > "$T/etc/rpi-player.buildtime"
+
 # Mount points
 mkdir -p "$T/boot" "$T/data"
 

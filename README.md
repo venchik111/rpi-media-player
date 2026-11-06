@@ -84,8 +84,7 @@ layers, each covering what the others cannot:
 Upstream QEMU `raspi4b` has no PCIe/USB/Ethernet and no Wi-Fi chip (PCIe+GENET patches are
 still under review), which is why the network part runs on `virt`. What remains unproven
 without hardware: the Broadcom radio itself accepting AP mode (standard brcmfmac + hostapd
-nl80211 setup, used widely on Pi 4) and the hardware H.264 encoder (libx264 fallback is
-automatic).
+nl80211 setup, used widely on Pi 4). Conversion uses the software encoder libx264
 
 ```bash
 scripts/docker.sh scripts/test.sh          # all three

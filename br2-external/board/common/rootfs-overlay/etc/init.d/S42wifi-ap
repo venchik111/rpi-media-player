@@ -1,17 +1,12 @@
 #!/bin/sh
-# Wi-Fi access point: wlan0 static address + hostapd with parameters from config.
+# Wi-Fi access point. A background watcher waits for wlan0 (it can appear late,
+# especially when booting from USB), starts hostapd, and keeps retrying: first
+# with the configured parameters, then with a basic 2.4 GHz configuration.
 . /usr/libexec/rpi-player/common.sh
 IFACE=wlan0
 CONF=/run/hostapd.conf
 PID=/run/hostapd.pid
-
-wait_iface() {
-	i=0
-	while ! ip link show "$IFACE" >/dev/null 2>&1; do
-		i=$((i + 1)); [ $i -gt 15 ] && return 1
-		sleep 1
-	done
-}
+WATCH_PID=/run/wifi-ap-watch.pid
 
 # If cfg80211 is built in, the kernel tries regulatory.db before the rootfs is
 # mounted and stays in world domain "00"; hostapd then waits forever in
@@ -26,8 +21,15 @@ set_country() {
 	done
 }
 
-gen_conf() {
-	cat > "$CONF" <<CFG
+unblock_radio() {
+	for r in /sys/class/rfkill/rfkill*; do
+		[ -e "$r/soft" ] && echo 0 > "$r/soft"
+	done
+}
+
+gen_conf() { # $1 = full | basic
+	if [ "$1" = "full" ]; then
+		cat > "$CONF" <<CFG
 interface=$IFACE
 driver=nl80211
 ctrl_interface=/run/hostapd
@@ -42,6 +44,18 @@ wmm_enabled=1
 auth_algs=1
 ignore_broadcast_ssid=${AP_HIDDEN:-0}
 CFG
+	else
+		cat > "$CONF" <<CFG
+interface=$IFACE
+driver=nl80211
+ctrl_interface=/run/hostapd
+ssid=$AP_SSID
+hw_mode=g
+channel=6
+auth_algs=1
+ignore_broadcast_ssid=${AP_HIDDEN:-0}
+CFG
+	fi
 	if [ -n "$AP_PASSPHRASE" ]; then
 		cat >> "$CONF" <<CFG
 wpa=2
@@ -53,29 +67,72 @@ CFG
 	chmod 0600 "$CONF"
 }
 
-start() {
-	load_env
-	if ! wait_iface; then
-		log "no $IFACE interface, access point disabled"
-		return 1
-	fi
-	set_country
+ap_running() { pidof hostapd >/dev/null && iw dev "$IFACE" info 2>/dev/null | grep -q '[[:space:]]ssid '; }
+
+stop_hostapd() {
+	[ -f "$PID" ] && kill "$(cat "$PID")" 2>/dev/null
+	killall hostapd 2>/dev/null
+	rm -f "$PID"
+}
+
+try_start() { # $1 = full | basic
+	stop_hostapd
+	sleep 1
+	unblock_radio
+	[ "$1" = "full" ] && set_country
 	ip addr flush dev "$IFACE"
 	ip addr add "$AP_ADDR/$AP_PREFIX" dev "$IFACE"
 	ip link set "$IFACE" up
-	gen_conf
-	start-stop-daemon -S -q -p "$PID" -x /usr/sbin/hostapd -- -B -P "$PID" "$CONF"
-	log "access point '$AP_SSID' on $IFACE ($AP_ADDR), channel $AP_CHANNEL"
+	gen_conf "$1"
+	/usr/sbin/hostapd -B -P "$PID" "$CONF" >/dev/null 2>&1
+	i=0
+	while [ $i -lt 20 ]; do
+		ap_running && return 0
+		i=$((i + 1)); sleep 1
+	done
+	return 1
+}
+
+watch() {
+	load_env
+	waited=0
+	while ! ip link show "$IFACE" >/dev/null 2>&1; do
+		[ "$waited" = 60 ] && log "no $IFACE interface yet, still waiting"
+		waited=$((waited + 1))
+		modprobe -q brcmfmac 2>/dev/null
+		sleep 1
+	done
+	mode=full
+	while :; do
+		if ap_running; then
+			sleep 5
+			continue
+		fi
+		if try_start "$mode"; then
+			log "access point '$AP_SSID' on $IFACE ($AP_ADDR), $mode configuration"
+			/etc/init.d/S43dnsmasq restart
+		else
+			log "access point failed with $mode configuration, retrying"
+			if [ "$mode" = "full" ]; then mode=basic; else mode=full; fi
+			sleep 2
+		fi
+	done
+}
+
+start() {
+	start-stop-daemon -S -q -b -m -p "$WATCH_PID" -x /etc/init.d/S42wifi-ap -- watch
 }
 
 stop() {
-	start-stop-daemon -K -q -p "$PID"
-	rm -f "$PID"
+	start-stop-daemon -K -q -p "$WATCH_PID"
+	rm -f "$WATCH_PID"
+	stop_hostapd
 }
 
 case "$1" in
 	start) start ;;
 	stop) stop ;;
 	restart) stop; sleep 1; start ;;
+	watch) watch ;;
 	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
 esac
