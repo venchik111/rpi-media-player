@@ -1,1 +1,1 @@
-root=/dev/mmcblk0p2 rootwait console=tty1 console=ttyAMA0,115200 quiet
+root=PARTUUID=52504934-02 rootwait console=tty1 console=ttyAMA0,115200 quiet

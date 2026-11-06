@@ -11,6 +11,9 @@ image boot.vfat {
 
 image sdcard.img {
 	hdimage {
+		align = 4M
+		# Fixed disk id: root=PARTUUID in cmdline.txt works from SD and USB alike
+		disk-signature = 0x52504934
 	}
 
 	partition boot {

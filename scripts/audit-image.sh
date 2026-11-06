@@ -43,7 +43,9 @@ mtype -i "$T/boot.vfat" ::config.txt > "$T/config.txt" 2>/dev/null
 mtype -i "$T/boot.vfat" ::cmdline.txt > "$T/cmdline.txt" 2>/dev/null
 check "config.txt: arm_64bit=1" grep -qx 'arm_64bit=1' "$T/config.txt"
 check "config.txt: kernel=Image" grep -qx 'kernel=Image' "$T/config.txt"
-check "cmdline.txt: root=/dev/mmcblk0p2 rootwait" grep -q 'root=/dev/mmcblk0p2 rootwait' "$T/cmdline.txt"
+check "cmdline.txt: root by PARTUUID (SD and USB)" grep -q 'root=PARTUUID=52504934-02 rootwait' "$T/cmdline.txt"
+check "disk id matches cmdline.txt" grep -q 'label-id: 0x52504934' "$T/pt"
+[ $((S1 % 8192)) -eq 0 ] && ok "p1 aligned to 4 MiB" || bad "p1 starts at sector $S1"
 [ "$(wc -l < "$T/cmdline.txt")" -le 1 ] && ok "cmdline.txt is a single line" || bad "cmdline.txt has several lines"
 mtype -i "$T/boot.vfat" ::rpi-player.conf > "$T/rpi-player.conf" 2>/dev/null
 check "rpi-player.conf parses as shell" sh -n "$T/rpi-player.conf"
@@ -58,6 +60,11 @@ KDIR=$(dbg "ls -p /lib/modules" | awk -F/ '$6 !~ /^\.\.?$/ && $6 != "" {print $6
 [ "$KDIR" = "$KVER_IMG" ] && ok "/lib/modules/$KDIR matches kernel" || bad "modules dir '$KDIR' != kernel '$KVER_IMG'"
 dbg "dump /lib/modules/$KDIR/modules.dep $T/modules.dep" >/dev/null
 dbg "dump /lib/modules/$KDIR/modules.alias $T/modules.alias" >/dev/null
+# Booting from USB needs these inside the kernel: no initramfs loads modules first.
+dbg "dump /lib/modules/$KDIR/modules.builtin $T/builtin" >/dev/null
+for m in pcie-brcmstb xhci-pci usb-storage sd_mod ext4; do
+	grep -qE "/$m\.ko$" "$T/builtin" && ok "built into kernel: $m" || bad "not built into kernel: $m"
+done
 for m in brcmfmac brcmutil cfg80211; do
 	grep -qE "/$m\.ko(\.xz|\.gz|\.zst)?:" "$T/modules.dep" && ok "module $m" || bad "module $m missing"
 done
